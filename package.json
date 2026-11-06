@@ -1,0 +1,18 @@
+{
+  "name": "shopify-phone-customer-merge",
+  "version": "1.0.0",
+  "description": "Merges duplicate Shopify customers created at checkout into the existing customer with the same phone number.",
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dry": "node --env-file=.env src/run.js --once --dry-run",
+    "once": "node --env-file=.env src/run.js --once",
+    "start": "node --env-file=.env src/run.js",
+    "backfill:dry": "node --env-file=.env src/backfill.js --dry-run",
+    "backfill": "node --env-file=.env src/backfill.js",
+    "dashboard": "node --env-file=.env src/server.js",
+    "railway": "node src/main.js"
+  }
+}

@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duplicate customers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  color-scheme: light;
+  --bg: #F2F4F7;
+  --surface: #FFFFFF;
+  --ink: #172033;
+  --muted: #5B6478;
+  --line: #DCE1E8;
+  --accent: #2747D6;
+  --accent-ink: #FFFFFF;
+  --low: #1E8A6E;
+  --medium: #A86A12;
+  --high: #C2412D;
+  --blocked: #6B7280;
+  --low-bg: #E3F4EE;
+  --medium-bg: #FBF0DC;
+  --high-bg: #FBE6E1;
+  --blocked-bg: #ECEEF1;
+  --focus: #2747D6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #12161F;
+    --surface: #1A2030;
+    --ink: #E6E9F0;
+    --muted: #9AA3B5;
+    --line: #2A3245;
+    --accent: #7D95FF;
+    --accent-ink: #0E1220;
+    --low: #3CC29C;
+    --medium: #E3A63B;
+    --high: #F07560;
+    --blocked: #8A93A6;
+    --low-bg: #16302A;
+    --medium-bg: #33270F;
+    --high-bg: #3A1D18;
+    --blocked-bg: #252B38;
+    --focus: #9DB0FF;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+button, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+a { color: var(--accent); }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 24px 20px 120px; }
+
+/* Header */
+header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 20px; }
+h1 { font-size: 28px; line-height: 1.2; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.sub { color: var(--muted); font-size: 14px; margin-top: 4px; }
+.btn {
+  border: 1px solid var(--line); background: var(--surface); border-radius: 8px;
+  padding: 8px 14px; cursor: pointer; font-weight: 500; white-space: nowrap;
+}
+.btn:hover { border-color: var(--muted); }
+a.btn { text-decoration: none; color: var(--ink); display: inline-block; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.danger { background: var(--high); border-color: var(--high); color: #fff; }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); padding: 6px 8px; }
+.btn.quiet:hover { color: var(--ink); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.banner { border: 1px solid var(--medium); background: var(--medium-bg); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; }
+
+/* Task progress */
+.task { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+.task[hidden] { display: none; }
+.task-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 10px; }
+.bar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+.task-results { margin-top: 10px; font-size: 14px; max-height: 220px; overflow: auto; }
+.task-results li { margin: 2px 0; }
+
+/* Risk strip: the overview and the filter in one */
+.strip { display: flex; gap: 4px; margin: 4px 0 8px; min-height: 92px; }
+.seg {
+  flex: var(--grow) 1 0; min-width: 132px; border: 0; border-radius: 10px; text-align: left; cursor: pointer;
+  padding: 12px 14px; display: flex; flex-direction: column; justify-content: space-between;
+  background: var(--seg-bg); color: var(--ink); border-top: 4px solid var(--seg);
+}
+.seg b { font-size: 30px; line-height: 1; font-weight: 600; color: var(--seg); }
+.seg span { font-size: 14px; }
+.seg small { color: var(--muted); font-size: 12.5px; }
+.seg[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--seg); }
+.seg.low { --seg: var(--low); --seg-bg: var(--low-bg); }
+.seg.medium { --seg: var(--medium); --seg-bg: var(--medium-bg); }
+.seg.high { --seg: var(--high); --seg-bg: var(--high-bg); }
+.seg.blocked { --seg: var(--blocked); --seg-bg: var(--blocked-bg); }
+.strip-note { color: var(--muted); font-size: 13.5px; margin-bottom: 20px; }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.tab { border: 0; background: none; padding: 10px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.search { flex: 1 1 260px; max-width: 420px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+
+/* Pair list */
+.list { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.cols, .pair {
+  display: grid; align-items: start; gap: 4px 14px;
+  grid-template-columns: 28px 104px minmax(0, 1fr) 20px minmax(0, 1fr) 150px 168px;
+  padding: 12px 16px;
+}
+.cols { color: var(--muted); font-size: 13px; border-bottom: 1px solid var(--line); padding-top: 10px; padding-bottom: 10px; }
+.pair { border-bottom: 1px solid var(--line); border-left: 3px solid var(--rc); }
+.pair:last-child { border-bottom: 0; }
+.pair[data-risk="low"] { --rc: var(--low); }
+.pair[data-risk="medium"] { --rc: var(--medium); }
+.pair[data-risk="high"] { --rc: var(--high); }
+.pair[data-risk="blocked"] { --rc: var(--blocked); }
+.pair.selected { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.pick input { width: 18px; height: 18px; margin: 3px 0 0; }
+.pill { display: inline-block; border-radius: 999px; padding: 1px 10px; font-size: 13px; font-weight: 500; color: var(--rc); background: color-mix(in srgb, var(--rc) 14%, transparent); }
+.acct .nm { font-weight: 600; overflow-wrap: anywhere; }
+.meta { color: var(--muted); }
+.acct .meta { font-size: 13.5px; overflow-wrap: anywhere; }
+.acct a { font-size: 13px; }
+.differs { text-decoration: underline wavy var(--high); text-underline-offset: 3px; }
+.differs.soft { text-decoration-color: var(--medium); }
+.flow { color: var(--muted); padding-top: 2px; }
+.facts { font-size: 13.5px; }
+.facts .ph { font-weight: 500; }
+.acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.why { grid-column: 3 / 6; font-size: 13px; color: var(--muted); }
+.why .r-high { color: var(--high); }
+.why .r-medium { color: var(--medium); }
+.why .r-blocked { color: var(--ink); }
+.more { padding: 12px 16px; text-align: center; }
+.empty { padding: 48px 20px; text-align: center; color: var(--muted); }
+.empty p { margin: 0 0 14px; }
+
+/* Simple tables for history / dismissed */
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 13px; }
+tr:last-child td { border-bottom: 0; }
+.tablewrap { overflow-x: auto; }
+
+/* Bulk bar */
+.bulk {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  width: min(760px, calc(100% - 24px)); background: var(--ink); color: var(--bg);
+  border-radius: 12px; padding: 12px 14px 12px 18px; display: flex; gap: 12px; align-items: center; justify-content: space-between;
+  box-shadow: 0 10px 30px rgba(10, 14, 25, .28);
+}
+.bulk[hidden] { display: none; }
+.bulk .btn.quiet { color: var(--bg); opacity: .75; }
+.bulk .btn.primary { background: var(--accent); }
+
+/* Dialogs */
+dialog { border: 1px solid var(--line); border-radius: 12px; padding: 0; width: min(760px, calc(100% - 24px)); background: var(--surface); color: var(--ink); }
+dialog::backdrop { background: rgba(10, 14, 25, .45); }
+.dlg { padding: 20px 22px; }
+.dlg h2 { margin: 0 0 6px; font-size: 20px; font-weight: 600; }
+.dlg p { margin: 8px 0; }
+.dlg-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+.compare td:first-child { color: var(--muted); width: 22%; }
+.compare td.diff { background: var(--high-bg); }
+.compare td.diffsoft { background: var(--medium-bg); }
+.confirm { display: flex; gap: 10px; align-items: flex-start; margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.confirm input { width: 18px; height: 18px; margin-top: 2px; }
+.reasons { margin: 8px 0 0; padding-left: 18px; }
+
+@media (max-width: 980px) {
+  .cols { display: none; }
+  .pair { grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr); }
+  .pair .risk { grid-column: 2 / 4; }
+  .pair .acct.dup { grid-column: 2 / 3; }
+  .pair .flow { display: none; }
+  .pair .acct.keep { grid-column: 3 / 4; }
+  .pair .acct::before { display: block; color: var(--muted); font-size: 12.5px; }
+  .pair .acct.dup::before { content: "Duplicate"; }
+  .pair .acct.keep::before { content: "Account kept"; }
+  .pair .facts, .pair .why, .pair .acts { grid-column: 2 / 4; }
+  .acts { justify-content: flex-start; }
+  .strip { flex-wrap: wrap; }
+  .seg { flex: 1 1 40%; }
+}
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Duplicate customers</h1>
+      <div class="sub" id="sub">Loading…</div>
+    </div>
+    <button class="btn primary" id="scanBtn" type="button">Scan store</button>
+  </header>
+
+  <div class="banner" id="practice" hidden>
+    Practice mode is on (<code>DRY_RUN=true</code>). Merges are only checked and simulated; no customer or points change.
+  </div>
+
+  <section class="task" id="task" hidden aria-live="polite"></section>
+
+  <div class="strip" id="strip" role="group" aria-label="Filter by risk"></div>
+  <div class="strip-note" id="stripNote"></div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-tab="review" id="tab-review">To review</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="history" id="tab-history">Merged</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="dismissed" id="tab-dismissed">Not duplicates</button>
+  </div>
+
+  <section id="view-review" role="tabpanel" aria-labelledby="tab-review">
+    <div class="toolbar">
+      <input class="search" id="search" type="search" placeholder="Search name, email, phone or customer ID" aria-label="Search">
+      <button class="btn" id="selLow" type="button">Select all low risk</button>
+      <button class="btn" id="selMedium" type="button">Select all medium risk</button>
+    </div>
+    <div class="list" id="list"></div>
+  </section>
+
+  <section id="view-history" role="tabpanel" aria-labelledby="tab-history" hidden>
+    <div class="list tablewrap" id="history"></div>
+  </section>
+
+  <section id="view-dismissed" role="tabpanel" aria-labelledby="tab-dismissed" hidden>
+    <div class="list tablewrap" id="dismissed"></div>
+  </section>
+</div>
+
+<div class="bulk" id="bulk" hidden>
+  <div id="bulkText"></div>
+  <div style="display:flex;gap:6px">
+    <button class="btn quiet" id="clearSel" type="button">Clear</button>
+    <button class="btn primary" id="bulkMerge" type="button">Merge selected</button>
+  </div>
+</div>
+
+<dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
+
+<script>
+const S = { meta: null, plan: { pairs: [] }, filter: 'all', q: '', selected: new Set(), shown: 200, tab: 'review', polling: null };
+const RISK = {
+  low: { label: 'Low risk', note: 'Can be merged in bulk' },
+  medium: { label: 'Medium risk', note: 'Check, then bulk merge' },
+  high: { label: 'High risk', note: 'Review one by one' },
+  blocked: { label: 'Blocked', note: 'Merge in Shopify admin' },
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+const fmtTime = (d) => d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+const fmtPhone = (p) => { const m = /^\+91(\d{5})(\d{5})$/.exec(p || ''); return m ? `+91 ${m[1]} ${m[2]}` : (p || ''); };
+const fmtPts = (n) => n == null ? '' : Number(n).toLocaleString('en-IN');
+const first = (s) => String(s || '').trim().toLowerCase().split(/\s+/)[0] || '';
+const norm = (s) => String(s || '').trim().toLowerCase();
+const adminUrl = (id) => `${S.meta.adminBase}/customers/${encodeURIComponent(id)}`;
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-By': 'dashboard' }, body: JSON.stringify(body),
+  };
+  const res = await fetch(path, opts);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
+  return json;
+}
+
+// ---------- Load ----------
+async function init() {
+  S.meta = await api('/api/meta');
+  $('practice').hidden = !S.meta.dryRun;
+  await loadPlan();
+  const t = await api('/api/task');
+  if (t.status) renderTask(t);
+  if (t.status === 'running') poll();
+}
+
+async function loadPlan() {
+  S.plan = await api('/api/plan');
+  const keys = new Set(S.plan.pairs.map((p) => p.key));
+  for (const k of [...S.selected]) if (!keys.has(k)) S.selected.delete(k);
+  renderHeader();
+  renderStrip();
+  renderList();
+  renderBulk();
+}
+
+function renderHeader() {
+  const p = S.plan;
+  $('sub').textContent = p.scannedAt
+    ? `${S.meta.shop}. Last scanned ${fmtTime(p.scannedAt)} by ${p.scannedBy}, ${Number(p.customerCount || 0).toLocaleString('en-IN')} customers checked. Signed in as ${S.meta.user}.`
+    : `${S.meta.shop}. Not scanned yet. Signed in as ${S.meta.user}.`;
+}
+
+// ---------- Risk strip ----------
+function renderStrip() {
+  const counts = { low: 0, medium: 0, high: 0, blocked: 0 };
+  let points = 0;
+  for (const p of S.plan.pairs) { counts[p.risk]++; points += p.points || 0; }
+  const total = S.plan.pairs.length || 1;
+  $('strip').innerHTML = Object.keys(RISK).map((r) => `
+    <button type="button" class="seg ${r}" style="--grow:${Math.max(counts[r] / total, 0.08)}" data-risk="${r}" aria-pressed="${S.filter === r}">
+      <b>${counts[r].toLocaleString('en-IN')}</b>
+      <span>${RISK[r].label}</span>
+      <small>${RISK[r].note}</small>
+    </button>`).join('');
+  const n = S.plan.pairs.length;
+  $('stripNote').innerHTML = !S.plan.scannedAt ? '' :
+    `${n.toLocaleString('en-IN')} duplicate account${n === 1 ? '' : 's'} found` +
+    (S.meta.flitsEnabled ? `, holding ${fmtPts(points)} Flits points to move` : '') +
+    (S.filter !== 'all' ? `. Showing ${RISK[S.filter].label.toLowerCase()} only. <button class="btn quiet" type="button" id="showAll">Show all</button>` : '. Select a risk level to filter.');
+}
+
+$('strip').addEventListener('click', (e) => {
+  const seg = e.target.closest('.seg');
+  if (!seg) return;
+  S.filter = S.filter === seg.dataset.risk ? 'all' : seg.dataset.risk;
+  S.shown = 200;
+  renderStrip(); renderList();
+});
+$('stripNote').addEventListener('click', (e) => {
+  if (e.target.id === 'showAll') { S.filter = 'all'; renderStrip(); renderList(); }
+});
+
+// ---------- Pair list ----------
+function visiblePairs() {
+  const q = S.q.trim().toLowerCase().replace(/\s+/g, '');
+  return S.plan.pairs.filter((p) => {
+    if (S.filter !== 'all' && p.risk !== S.filter) return false;
+    if (!q) return true;
+    const hay = [p.phone, p.dup.name, p.dup.email, p.dup.id, p.keep.name, p.keep.email, p.keep.id].join('|').toLowerCase().replace(/\s+/g, '');
+    return hay.includes(q);
+  });
+}
+
+function nameHtml(acct, other) {
+  const f = first(acct.firstName), of = first(other.firstName);
+  const fClass = f && of && f !== of ? 'differs' : '';
+  const lClass = !fClass && norm(acct.lastName) && norm(other.lastName) && norm(acct.lastName) !== norm(other.lastName) ? 'differs soft' : '';
+  if (!acct.firstName && !acct.lastName) return esc(acct.name || 'No name');
+  return `<span class="${fClass}">${esc(acct.firstName)}</span> <span class="${lClass}">${esc(acct.lastName)}</span>`;
+}
+
+function acctHtml(acct, other, role) {
+  const bits = [
+    acct.email || 'No email',
+    `${acct.orders} order${acct.orders === 1 ? '' : 's'}, joined ${fmtDate(acct.createdAt)}${acct.city ? `, ${acct.city}` : ''}`,
+  ];
+  return `<div class="acct ${role}">
+    <div class="nm">${nameHtml(acct, other)}</div>
+    ${bits.map((b) => `<div class="meta">${esc(b)}</div>`).join('')}
+    <a href="${adminUrl(acct.id)}" target="_blank" rel="noopener">Open in Shopify</a>
+  </div>`;
+}
+
+function pairHtml(p) {
+  const canPick = p.risk === 'low' || p.risk === 'medium';
+  const sel = S.selected.has(p.key);
+  let actions = '';
+  if (p.risk === 'blocked') {
+    actions = `<a class="btn" href="${adminUrl(p.keep.id)}" target="_blank" rel="noopener">Merge in Shopify</a>`;
+  } else if (p.risk === 'high') {
+    actions = `<button class="btn primary" type="button" data-act="review" data-key="${esc(p.key)}">Review and merge</button>`;
+  } else {
+    actions = `<button class="btn" type="button" data-act="one" data-key="${esc(p.key)}">Merge</button>`;
+  }
+  actions += `<button class="btn quiet" type="button" data-act="dismiss" data-key="${esc(p.key)}">Not the same person</button>`;
+
+  const reasons = p.risk === 'blocked'
+    ? `<span class="r-blocked">${esc(p.check?.reason || 'Shopify cannot merge these automatically')}</span>`
+    : p.reasons.filter((r) => r.level !== 'low').map((r) => `<span class="r-${r.level}">${esc(r.text)}</span>`).join(', ') ||
+      esc(p.reasons.map((r) => r.text).join(', '));
+
+  return `<div class="pair ${sel ? 'selected' : ''}" data-risk="${p.risk}">
+    <label class="pick">${canPick
+      ? `<input type="checkbox" data-key="${esc(p.key)}" ${sel ? 'checked' : ''} aria-label="Select ${esc(p.dup.name)}">`
+      : ''}</label>
+    <div class="risk"><span class="pill">${RISK[p.risk].label}</span></div>
+    ${acctHtml(p.dup, p.keep, 'dup')}
+    <div class="flow" aria-label="merges into">
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 9h12M10 4l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    ${acctHtml(p.keep, p.dup, 'keep')}
+    <div class="facts">
+      <div class="ph">${esc(fmtPhone(p.phone))}</div>
+      ${S.meta.flitsEnabled ? `<div class="meta">${p.points ? `${fmtPts(p.points)} points to move` : 'No points to move'}</div>` : ''}
+    </div>
+    <div class="acts">${actions}</div>
+    <div class="why">${reasons}</div>
+  </div>`;
+}
+
+function renderList() {
+  if (!S.plan.scannedAt) {
+    $('list').innerHTML = `<div class="empty"><p>Scan the store to find customers who have more than one account with the same phone number.</p>
+      <button class="btn primary" type="button" data-act="scan">Scan store</button></div>`;
+    return;
+  }
+  const pairs = visiblePairs();
+  if (!pairs.length) {
+    $('list').innerHTML = `<div class="empty"><p>${S.plan.pairs.length ? 'No pairs match this filter.' : 'No duplicate accounts left to review.'}</p></div>`;
+    return;
+  }
+  const head = `<div class="cols"><span></span><span>Risk</span><span>Duplicate account</span><span></span><span>Account kept</span><span>Phone</span><span></span></div>`;
+  const rows = pairs.slice(0, S.shown).map(pairHtml).join('');
+  const more = pairs.length > S.shown
+    ? `<div class="more"><button class="btn" type="button" data-act="more">Show ${Math.min(200, pairs.length - S.shown)} more of ${pairs.length - S.shown} remaining</button></div>` : '';
+  $('list').innerHTML = head + rows + more;
+}
+
+$('search').addEventListener('input', (e) => { S.q = e.target.value; S.shown = 200; renderList(); });
+
+$('list').addEventListener('change', (e) => {
+  const key = e.target.dataset?.key;
+  if (!key || e.target.type !== 'checkbox') return;
+  e.target.checked ? S.selected.add(key) : S.selected.delete(key);
+  e.target.closest('.pair').classList.toggle('selected', e.target.checked);
+  renderBulk();
+});
+
+$('list').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  const pair = S.plan.pairs.find((p) => p.key === b.dataset.key);
+  if (b.dataset.act === 'more') { S.shown += 200; renderList(); }
+  if (b.dataset.act === 'scan') startScan();
+  if (b.dataset.act === 'one' && pair) confirmMerge([pair]);
+  if (b.dataset.act === 'review' && pair) reviewHighRisk(pair);
+  if (b.dataset.act === 'dismiss' && pair) confirmDismiss(pair);
+});
+
+function selectRisk(risk) {
+  const pairs = visiblePairs().filter((p) => p.risk === risk);
+  const allOn = pairs.length && pairs.every((p) => S.selected.has(p.key));
+  for (const p of pairs) allOn ? S.selected.delete(p.key) : S.selected.add(p.key);
+  renderList(); renderBulk();
+}
+$('selLow').addEventListener('click', () => selectRisk('low'));
+$('selMedium').addEventListener('click', () => selectRisk('medium'));
+
+// ---------- Bulk bar ----------
+function selectedPairs() { return S.plan.pairs.filter((p) => S.selected.has(p.key)); }
+
+function renderBulk() {
+  const pairs = selectedPairs();
+  $('bulk').hidden = pairs.length === 0;
+  if (!pairs.length) return;
+  const pts = pairs.reduce((s, p) => s + (p.points || 0), 0);
+  const med = pairs.filter((p) => p.risk === 'medium').length;
+  $('bulkText').textContent = `${pairs.length} selected${med ? ` (${med} medium risk)` : ''}` +
+    (S.meta.flitsEnabled ? `, ${fmtPts(pts)} points will move` : '');
+  $('bulkMerge').textContent = `Merge ${pairs.length} account${pairs.length === 1 ? '' : 's'}`;
+}
+$('clearSel').addEventListener('click', () => { S.selected.clear(); renderList(); renderBulk(); });
+$('bulkMerge').addEventListener('click', () => confirmMerge(selectedPairs()));
+
+// ---------- Dialogs ----------
+function openDialog(html) {
+  $('dlgBody').innerHTML = html;
+  $('dlg').showModal();
+}
+function closeDialog() { $('dlg').close(); }
+$('dlg').addEventListener('click', (e) => {
+  if (e.target.closest('[data-close]')) closeDialog();
+});
+
+function confirmMerge(pairs) {
+  const pts = pairs.reduce((s, p) => s + (p.points || 0), 0);
+  const one = pairs.length === 1 ? pairs[0] : null;
+  openDialog(`
+    <h2>${one ? 'Merge these accounts?' : `Merge ${pairs.length} duplicate accounts?`}</h2>
+    ${one ? `<p>${esc(one.dup.name || one.dup.email)} will be merged into ${esc(one.keep.name || one.keep.email)} (${esc(fmtPhone(one.phone))}).</p>` : ''}
+    <p>Orders, addresses and tags move to the account that's kept, and the duplicate account is deleted.
+    ${S.meta.flitsEnabled && pts ? `${fmtPts(pts)} Flits points will be added to the kept accounts.` : ''}</p>
+    <p>Shopify can't undo a merge. Each pair is checked again with Shopify just before it's merged.</p>
+    ${S.meta.dryRun ? '<p><strong>Practice mode:</strong> nothing will actually change.</p>' : ''}
+    <div class="dlg-actions">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn primary" type="button" id="goMerge">${one ? 'Merge accounts' : `Merge ${pairs.length} accounts`}</button>
+    </div>`);
+  $('goMerge').addEventListener('click', () => runMerge(pairs.map((p) => p.key), false));
+}
+
+function reviewHighRisk(p) {
+  const d = p.dup, k = p.keep;
+  const row = (label, a, b, cmp = 'exact') => {
+    const differ = cmp === 'first' ? first(a) !== first(b) : norm(a) !== norm(b);
+    const cls = differ ? (cmp === 'first' ? 'diff' : 'diffsoft') : '';
+    return `<tr><td>${label}</td><td class="${cls}">${esc(a) || '<span class="meta">none</span>'}</td><td class="${cls}">${esc(b) || '<span class="meta">none</span>'}</td></tr>`;
+  };
+  openDialog(`
+    <h2>Review a high risk pair</h2>
+    <p>Merge only if you're sure both accounts belong to the same person. If one is a gift or family address, choose “Not the same person”.</p>
+    <ul class="reasons">${p.reasons.map((r) => `<li class="r-${r.level}" style="color:var(--${r.level === 'low' ? 'muted' : r.level})">${esc(r.text)}</li>`).join('')}</ul>
+    <div class="tablewrap" style="margin-top:14px">
+    <table class="compare">
+      <tr><th></th><th>Duplicate account (will be deleted)</th><th>Account kept</th></tr>
+      ${row('First name', d.firstName, k.firstName, 'first')}
+      ${row('Last name', d.lastName, k.lastName)}
+      <tr><td>Email</td><td>${esc(d.email) || '<span class="meta">none</span>'}</td><td>${esc(k.email) || '<span class="meta">none</span>'}</td></tr>
+      <tr><td>Phone match</td><td colspan="2">${esc(fmtPhone(p.phone))} ${p.type === 'phone-owner' ? '(kept account logs in with it)' : '(on both accounts\u2019 addresses)'}</td></tr>
+      <tr><td>Orders</td><td>${d.orders}</td><td>${k.orders}</td></tr>
+      <tr><td>Joined</td><td>${fmtDate(d.createdAt)}</td><td>${fmtDate(k.createdAt)}</td></tr>
+      ${row('City', d.city, k.city)}
+      ${S.meta.flitsEnabled ? `<tr><td>Flits points</td><td>${fmtPts(p.points || 0)} (will move)</td><td></td></tr>` : ''}
+      <tr><td>In Shopify</td><td><a href="${adminUrl(d.id)}" target="_blank" rel="noopener">Open duplicate</a></td><td><a href="${adminUrl(k.id)}" target="_blank" rel="noopener">Open account kept</a></td></tr>
+    </table></div>
+    <label class="confirm"><input type="checkbox" id="sure"> <span>I checked both accounts and they belong to the same person.</span></label>
+    <div class="dlg-actions">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn" type="button" id="notSame">Not the same person</button>
+      <button class="btn danger" type="button" id="goHigh" disabled>Merge these accounts</button>
+    </div>`);
+  $('sure').addEventListener('change', (e) => { $('goHigh').disabled = !e.target.checked; });
+  $('goHigh').addEventListener('click', () => runMerge([p.key], true));
+  $('notSame').addEventListener('click', () => dismiss(p, 'Not the same person (reviewed)'));
+}
+
+function confirmDismiss(p) {
+  openDialog(`
+    <h2>Mark as not the same person?</h2>
+    <p>${esc(p.dup.name || p.dup.email)} and ${esc(p.keep.name || p.keep.email)} won't be suggested again. You can restore this from the “Not duplicates” tab.</p>
+    <div class="dlg-actions">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn primary" type="button" id="goDismiss">Mark as not the same person</button>
+    </div>`);
+  $('goDismiss').addEventListener('click', () => dismiss(p, 'Not the same person'));
+}
+
+async function dismiss(p, reason) {
+  try {
+    await api('/api/dismiss', { key: p.key, reason });
+    S.selected.delete(p.key);
+    closeDialog();
+    await loadPlan();
+  } catch (err) { alert(err.message); }
+}
+
+// ---------- Tasks ----------
+async function startScan() {
+  try { renderTask(await api('/api/scan', {})); poll(); } catch (err) { alert(err.message); }
+}
+$('scanBtn').addEventListener('click', startScan);
+
+async function runMerge(keys, confirmHighRisk) {
+  try {
+    const t = await api('/api/merge', { keys, confirmHighRisk });
+    closeDialog();
+    for (const k of keys) S.selected.delete(k);
+    renderBulk();
+    renderTask(t);
+    poll();
+  } catch (err) { alert(err.message); }
+}
+
+function poll() {
+  clearInterval(S.polling);
+  $('scanBtn').disabled = true;
+  S.polling = setInterval(async () => {
+    const t = await api('/api/task').catch(() => null);
+    if (!t) return;
+    renderTask(t);
+    if (t.status !== 'running') {
+      clearInterval(S.polling);
+      $('scanBtn').disabled = false;
+      await loadPlan();
+      if (S.tab === 'history') loadHistory();
+    }
+  }, 1500);
+}
+
+function renderTask(t) {
+  const el = $('task');
+  el.hidden = false;
+  const what = t.type === 'scan' ? 'Scan' : (S.meta.dryRun ? 'Practice merge' : 'Merge');
+  const pct = t.total ? Math.round((t.done / t.total) * 100) : (t.status === 'running' ? 15 : 100);
+  let status;
+  if (t.status === 'running') {
+    status = t.type === 'scan' && t.phase === 'Loading customers'
+      ? `${t.phase}: ${Number(t.done).toLocaleString('en-IN')} so far`
+      : `${t.phase}: ${t.done} of ${t.total}`;
+  } else if (t.status === 'failed') {
+    status = `${what} stopped: ${t.error}`;
+  } else if (t.type === 'scan') {
+    status = 'Scan finished.';
+  } else {
+    const ok = t.results.filter((r) => r.status === 'merged' || r.status === 'would-merge').length;
+    status = `${what} finished: ${ok} of ${t.total} ${S.meta.dryRun ? 'would merge' : 'merged'}.`;
+  }
+  const problems = (t.results || []).filter((r) => !['merged', 'would-merge'].includes(r.status));
+  const showAll = t.type === 'merge' && t.status !== 'running';
+  const items = showAll ? (problems.length ? problems : t.results.slice(0, 20)) : [];
+  el.innerHTML = `
+    <div class="task-head"><strong>${esc(status)}</strong>
+      ${t.status !== 'running' ? '<button class="btn quiet" type="button" id="hideTask">Hide</button>' : `<span class="meta">Started by ${esc(t.by)}</span>`}</div>
+    ${t.status === 'running' ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ''}
+    ${items.length ? `<div class="task-results">${problems.length ? '<p>These need attention:</p>' : ''}<ul>${items.map((r) =>
+      `<li>${esc(r.dup || r.key)} into ${esc(r.keep)}: ${esc(r.message)}</li>`).join('')}</ul></div>` : ''}`;
+  const hide = $('hideTask');
+  if (hide) hide.addEventListener('click', () => { el.hidden = true; });
+}
+
+// ---------- Tabs ----------
+document.querySelector('.tabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  S.tab = tab.dataset.tab;
+  document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', String(t === tab)));
+  for (const v of ['review', 'history', 'dismissed']) $(`view-${v}`).hidden = v !== S.tab;
+  $('bulk').hidden = S.tab !== 'review' || S.selected.size === 0;
+  if (S.tab === 'history') loadHistory();
+  if (S.tab === 'dismissed') loadDismissed();
+});
+
+async function loadHistory() {
+  const rows = await api('/api/history');
+  if (!rows.length) { $('history').innerHTML = '<div class="empty"><p>No merges yet.</p></div>'; return; }
+  const who = (a) => `${esc(a?.name || '')}${a?.name ? '<br>' : ''}<span class="meta">${esc(a?.email || '')}${a?.email ? ', ' : ''}ID ${esc(a?.id)}</span>`;
+  $('history').innerHTML = `<table>
+    <tr><th>When</th><th>By</th><th>Duplicate (deleted)</th><th>Merged into</th><th>Risk</th><th>Points moved</th><th>Result</th></tr>
+    ${rows.map((r) => `<tr>
+      <td>${esc(fmtTime(r.at))}</td>
+      <td>${esc(r.actor)}<br><span class="meta">${esc(r.source)}</span></td>
+      <td>${who(r.dup)}</td>
+      <td>${who(r.keep)}<br><a href="${adminUrl(r.keep?.id)}" target="_blank" rel="noopener">Open in Shopify</a></td>
+      <td>${esc(RISK[r.risk]?.label || r.risk || '')}</td>
+      <td>${fmtPts(r.pointsMoved || 0)}</td>
+      <td>${esc(r.message || r.status)}</td></tr>`).join('')}
+  </table>`;
+}
+
+async function loadDismissed() {
+  const rows = await api('/api/dismissed');
+  if (!rows.length) { $('dismissed').innerHTML = '<div class="empty"><p>Pairs you mark as “Not the same person” appear here.</p></div>'; return; }
+  $('dismissed').innerHTML = `<table>
+    <tr><th>Marked</th><th>Duplicate</th><th>Other account</th><th>Phone</th><th>Reason</th><th></th></tr>
+    ${rows.map((r) => `<tr>
+      <td>${esc(fmtTime(r.at))}<br><span class="meta">by ${esc(r.by)}</span></td>
+      <td>${esc(r.dup?.name)}<br><span class="meta">${esc(r.dup?.email)}</span></td>
+      <td>${esc(r.keep?.name)}<br><span class="meta">${esc(r.keep?.email)}</span></td>
+      <td>${esc(fmtPhone(r.phone))}</td>
+      <td>${esc(r.reason)}</td>
+      <td><button class="btn" type="button" data-restore="${esc(r.key)}">Restore</button></td></tr>`).join('')}
+  </table>`;
+}
+$('dismissed').addEventListener('click', async (e) => {
+  const key = e.target.dataset?.restore;
+  if (!key) return;
+  try { const r = await api('/api/restore', { key }); alert(r.message); loadDismissed(); } catch (err) { alert(err.message); }
+});
+
+init().catch((err) => { $('sub').textContent = `Couldn't load the dashboard: ${err.message}`; });
+</script>
+</body>
+</html>
