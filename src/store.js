@@ -68,6 +68,22 @@ export function recordHistory(entry) {
   fs.appendFileSync(historyPath, JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n');
 }
 
+/** Updates the newest history entry matching `match` (e.g. once the points step has finished). */
+export function updateHistory(match, patch) {
+  if (!fs.existsSync(historyPath)) return false;
+  const lines = fs.readFileSync(historyPath, 'utf8').split('\n').filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let entry;
+    try { entry = JSON.parse(lines[i]); } catch { continue; }
+    if (!match(entry)) continue;
+    lines[i] = JSON.stringify({ ...entry, ...patch });
+    fs.writeFileSync(historyPath + '.tmp', lines.join('\n') + '\n');
+    fs.renameSync(historyPath + '.tmp', historyPath);
+    return true;
+  }
+  return false;
+}
+
 export function readHistory(limit = 2000) {
   if (!fs.existsSync(historyPath)) return [];
   const lines = fs.readFileSync(historyPath, 'utf8').trim().split('\n').filter(Boolean);

@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { fetchAllCustomers, buildPlan, checkPairs, mergePair } from './mergeService.js';
-import { readHistory, loadJson, saveJson, getAutoMerge, setAutoMerge } from './store.js';
+import { readHistory, loadJson, saveJson, getAutoMerge, setAutoMerge, loadState } from './store.js';
 import { runStatus } from './status.js';
 
 // Automatic merges counted from the merge history, by Indian date.
@@ -228,8 +228,13 @@ async function handle(req, res) {
     case 'GET /api/task':
       return send(res, 200, task || {});
 
-    case 'GET /api/history':
-      return send(res, 200, readHistory());
+    case 'GET /api/history': {
+      // Automatic merges whose points step hasn't finished yet are still waiting for delivery.
+      const waiting = new Set(Object.values(loadState().pendingPoints || {}).map((p) => String(p.duplicateId)));
+      return send(res, 200, readHistory().map((h) => (h.actor === 'automatic' && !h.pointsStatus
+        ? { ...h, pointsStatus: waiting.has(String(h.dup?.id)) ? 'waiting' : 'finished' }
+        : h)));
+    }
 
     case 'GET /api/dismissed': {
       const d = loadJson('dismissed.json', {});

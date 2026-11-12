@@ -8,7 +8,18 @@
 import { config } from './config.js';
 import { getOrderDelivery } from './shopify.js';
 import * as flits from './flits.js';
-import { logPoints, logAttention, getMovedPoints, addMovedPoints } from './store.js';
+import { logPoints, logAttention, getMovedPoints, addMovedPoints, updateHistory } from './store.js';
+
+// What the Merged tab says once the points step has finished.
+function historyMessage(orderName, status, points, details) {
+  const head = `Merged after order ${orderName}.`;
+  switch (status) {
+    case 'moved': return `${head} ${points} Flits points ${details} after delivery.`;
+    case 'nothing-to-move': return `${head} Delivered; no Flits points were left on the duplicate, so delivery points went straight to the kept account.`;
+    case 'cancelled': return `${head} Order cancelled, no points moved.`;
+    default: return `${head} Flits points not moved automatically: ${details}. See needs-attention list.`;
+  }
+}
 import { notePoints } from './annotate.js';
 
 // What the comment in Shopify says for each outcome of the points step.
@@ -33,6 +44,11 @@ export async function processPendingPoints(state) {
   for (const [orderId, p] of Object.entries(state.pendingPoints)) {
     const done = async (status, points, details, attention) => {
       logPoints(p, status, points, details);
+      // Show the result on the merge's row in the dashboard's Merged tab.
+      updateHistory(
+        (h) => h.actor === 'automatic' && h.dup?.id === p.duplicateId && !h.pointsStatus,
+        { pointsStatus: status, pointsMoved: status === 'moved' ? points : 0, message: historyMessage(p.orderName, status, points, details) },
+      );
       const text = commentFor(status, points, details);
       if (text) await notePoints({ orderName: p.orderName, dupId: p.duplicateId, keepId: p.oldId, text });
       if (attention) {

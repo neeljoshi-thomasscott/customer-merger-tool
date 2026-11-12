@@ -796,6 +796,17 @@ document.querySelector('.tabs').addEventListener('click', (e) => {
   if (S.tab === 'dismissed') loadDismissed();
 });
 
+// Automatic merges move points only after delivery, so their row changes once that step has run.
+function pointsCell(r) {
+  if (r.pointsStatus === 'waiting') return '<span class="meta">Waiting for delivery</span>';
+  return fmtPts(r.pointsMoved || 0);
+}
+function resultText(r) {
+  if (r.pointsStatus === 'waiting') return `${(r.message || '').split(';')[0]}. Flits points are checked after the order is delivered.`;
+  if (r.pointsStatus === 'finished') return `${(r.message || '').split(';')[0]}. Points step finished; see the customer's note in Shopify.`;
+  return r.message || r.status;
+}
+
 async function loadHistory() {
   const rows = await api('/api/history');
   if (!rows.length) { $('history').innerHTML = '<div class="empty"><p>No merges yet.</p></div>'; return; }
@@ -808,8 +819,8 @@ async function loadHistory() {
       <td>${who(r.dup)}</td>
       <td>${who(r.keep)}<br><a href="${adminUrl(r.keep?.id)}" target="_blank" rel="noopener">Open in Shopify</a></td>
       <td>${esc(RISK[r.risk]?.label || r.risk || '')}</td>
-      <td>${fmtPts(r.pointsMoved || 0)}</td>
-      <td>${esc(r.message || r.status)}</td></tr>`).join('')}
+      <td>${pointsCell(r)}</td>
+      <td>${esc(resultText(r))}</td></tr>`).join('')}
   </table>`;
 }
 
