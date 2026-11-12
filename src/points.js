@@ -34,7 +34,7 @@ export async function processPendingPoints(state) {
     const done = async (status, points, details, attention) => {
       logPoints(p, status, points, details);
       const text = commentFor(status, points, details);
-      if (text) await notePoints({ orderId, orderName: p.orderName, dupId: p.duplicateId, keepId: p.oldId, text });
+      if (text) await notePoints({ orderName: p.orderName, dupId: p.duplicateId, keepId: p.oldId, text });
       if (attention) {
         logAttention({ name: p.orderName }, {
           phone: '', newId: p.duplicateId, keepId: p.oldId, attention,

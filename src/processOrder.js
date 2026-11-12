@@ -98,7 +98,7 @@ async function doMerge(order, current, keep, override, base) {
   }
 
   await noteMerge({
-    orderId: order.id, orderName: order.name,
+    orderName: order.name,
     dupId: base.newId, dupLabel: current.defaultEmailAddress?.emailAddress || '',
     keepId: base.keepId, by: 'automatic merge',
     pointsText: config.flits.enabled ? `Flits points are checked ${config.pointsDelayAfterDeliveryMinutes} minutes after delivery.` : '',
