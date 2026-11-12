@@ -204,4 +204,38 @@ export async function getOrderDelivery(orderId) {
   return { order, deliveredAt: times.length ? new Date(Math.max(...times)).toISOString() : null };
 }
 
+// ---------- Notes and tags (comments left by the tool) ----------
+const Q_NOTE = `query Note($id: ID!) { node(id: $id) { ... on Order { note } ... on Customer { note } } }`;
+
+const M_ORDER_NOTE = `
+mutation OrderNote($input: OrderInput!) {
+  orderUpdate(input: $input) { order { id } userErrors { field message } }
+}`;
+
+const M_CUSTOMER_NOTE = `
+mutation CustomerNote($input: CustomerInput!) {
+  customerUpdate(input: $input) { customer { id } userErrors { field message } }
+}`;
+
+const M_TAGS_ADD = `
+mutation TagsAdd($id: ID!, $tags: [String!]!) {
+  tagsAdd(id: $id, tags: $tags) { node { id } userErrors { field message } }
+}`;
+
+/** Adds a line to the end of an order's or customer's note, keeping what's already there. */
+export async function appendNote(id, line) {
+  const current = (await gql(Q_NOTE, { id })).node?.note || '';
+  const note = current.trim() ? `${current.trimEnd()}\n${line}` : line;
+  const isOrder = String(id).includes('/Order/');
+  const data = await gql(isOrder ? M_ORDER_NOTE : M_CUSTOMER_NOTE, { input: { id, note } });
+  const result = isOrder ? data.orderUpdate : data.customerUpdate;
+  if (result.userErrors?.length) throw new Error(JSON.stringify(result.userErrors));
+}
+
+export async function addTags(id, tags) {
+  const result = (await gql(M_TAGS_ADD, { id, tags })).tagsAdd;
+  if (result.userErrors?.length) throw new Error(JSON.stringify(result.userErrors));
+}
+
 export const numericId = (gid) => String(gid).split('/').pop();
+export const customerGid = (id) => (String(id).startsWith('gid://') ? String(id) : `gid://shopify/Customer/${id}`);

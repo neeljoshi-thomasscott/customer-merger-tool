@@ -184,6 +184,20 @@ npm run backfill                       # all low risk pairs
 npm run backfill -- --include-medium   # also medium risk pairs
 ```
 
+## Comments in Shopify and Flits
+
+Every merge and points transfer leaves a comment starting with *Customer merger tool:*, added after any existing text:
+
+| Where | Written when |
+|---|---|
+| Kept customer's note | Every merge (automatic or dashboard) and every points result after delivery |
+| Order note | Automatic merges and the points result for that order |
+| Order tag `merged-by-tool` | Automatic merges, so merged orders can be filtered in Shopify admin |
+| Flits points entry | Whenever points are actually moved |
+
+Order notes and tags need the **`write_orders`** scope on the Shopify app. Without it they're skipped with a
+warning in the log; merges and customer notes still work.
+
 ## Files written in `data/`
 
 | File | Contents |

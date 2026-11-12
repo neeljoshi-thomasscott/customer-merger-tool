@@ -6,6 +6,7 @@ import { gql, previewMerge, mergeCustomers, numericId } from './shopify.js';
 import { normalizePhone } from './phone.js';
 import * as flits from './flits.js';
 import { recordHistory, logAttention, getMovedPoints, addMovedPoints } from './store.js';
+import { noteMerge } from './annotate.js';
 
 const cc = config.countryCode;
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -237,7 +238,14 @@ export async function mergePair(pair, { actor = 'system', source = 'dashboard' }
     return { ok: false, status: 'needs-attention', message };
   }
 
+  // Comment on the kept customer in Shopify (never stops the merge if it fails).
+  const note = (pointsText) => noteMerge({
+    dupId: pair.dup.id, dupLabel: [pair.dup.name, pair.dup.email].filter(Boolean).join(', '),
+    keepId: pair.keep.id, by: `${actor} (${source})`, pointsText,
+  });
+
   if (!toMove || !config.flits.movePointsToOldCustomer) {
+    await note(toMove ? `${toMove} Flits points were not moved (moving is turned off).` : 'No Flits points to move.');
     history('merged', 'Merged');
     return { ok: true, status: 'merged', message: 'Merged', pointsMoved: 0 };
   }
@@ -245,18 +253,21 @@ export async function mergePair(pair, { actor = 'system', source = 'dashboard' }
   const target = pair.keep.email || (await flits.getCustomer(pair.keep.id))?.email;
   if (!target) {
     const message = `Merged. ${toMove} points not moved: the kept account has no email. Add them in Flits by hand.`;
+    await note(`${toMove} Flits points NOT moved: this account has no email. Add them in Flits by hand.`);
     logAttention({ name: 'dashboard' }, { phone: pair.phone, newId: pair.dup.id, keepId: pair.keep.id, attention: message });
     history('needs-attention', message);
     return { ok: true, status: 'needs-attention', message };
   }
 
   try {
-    await flits.addLoyaltyPoints(target, toMove, `Points moved from duplicate account ${pair.dup.id} (customer merge)`);
+    await flits.addLoyaltyPoints(target, toMove, `Customer merger tool: points moved from duplicate account ${pair.dup.id} (customer merge)`);
     addMovedPoints(pair.dup.id, toMove);
+    await note(`${toMove} Flits points moved to ${target}.`);
     history('merged', `Merged, ${toMove} points moved`, toMove);
     return { ok: true, status: 'merged', message: `Merged, ${toMove} points moved to ${target}`, pointsMoved: toMove };
   } catch (err) {
     const message = `Merged, but moving ${toMove} points failed: ${err.message}. Add them in Flits by hand.`;
+    await note(`moving ${toMove} Flits points FAILED. Add them in Flits by hand.`);
     logAttention({ name: 'dashboard' }, { phone: pair.phone, newId: pair.dup.id, keepId: pair.keep.id, attention: message });
     history('needs-attention', message);
     return { ok: true, status: 'needs-attention', message };
