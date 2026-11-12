@@ -7,7 +7,11 @@ import { loadState, saveState, logAction, logAttention, recordHistory, getAutoMe
 async function cycle() {
   const state = loadState();
   const now = Date.now();
-  const from = new Date(now - config.lookbackHours * 3600 * 1000).toISOString();
+  const auto = getAutoMerge();
+  // Only orders placed after automatic merging was last turned on. Older orders are never merged
+  // automatically; their duplicates are reviewed in the dashboard instead.
+  const switchedOnAt = auto.at ? Date.parse(auto.at) : 0;
+  const from = new Date(Math.max(now - config.lookbackHours * 3600 * 1000, switchedOnAt)).toISOString();
   const to = new Date(now - config.minOrderAgeMinutes * 60 * 1000).toISOString();
   const query = `created_at:>='${from}' AND created_at:<='${to}'`;
 
@@ -15,8 +19,7 @@ async function cycle() {
   console.log(`\n[${new Date().toISOString()}] ${config.dryRun ? 'DRY RUN' : 'LIVE'}: orders ${from} -> ${to}`);
 
   // Stage 1 runs only while automatic merging is switched on in the dashboard.
-  // Orders are not marked as handled while it's off, so they're picked up once it's on again.
-  const autoOn = getAutoMerge().enabled;
+  const autoOn = auto.enabled;
   if (!autoOn) console.log('  merge: automatic merging is OFF (turn it on in the dashboard)');
   else if (config.autoMergeOnlyPhones.length) console.log(`  merge: TEST MODE, only orders with phone ${config.autoMergeOnlyPhones.join(', ')}`);
 

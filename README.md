@@ -35,9 +35,10 @@ Nothing changes while `DRY_RUN=true`.
 
 **Stage 1 is off by default.** Turn it on or off with the *Automatic merge after new orders* switch at the top
 of the dashboard. The setting is saved on the Volume (`data/settings.json`), so it survives redeploys, and takes
-effect on the next run without a redeploy. While it's off, orders aren't marked as handled, so when it's turned on
-again the tool also merges orders from the last `LOOKBACK_HOURS`. Stage 2 (points after delivery) keeps running
-either way, for merges that already happened.
+effect on the next run without a redeploy. Only orders placed **after** it was last turned on are merged
+automatically; orders placed earlier, or while it was off, are never merged automatically. Their duplicates show
+up in the dashboard after a scan, for the team to review. Stage 2 (points after delivery) keeps running either way,
+for merges that already happened.
 
 ## Deploy on Railway
 

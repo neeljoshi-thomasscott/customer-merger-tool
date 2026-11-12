@@ -514,7 +514,7 @@ function renderAuto() {
     <div>
       <div>Automatic merge after new orders: <span class="state ${a.enabled ? 'on' : 'off'}">${a.enabled ? 'ON' : 'OFF'}</span></div>
       <div class="meta">${a.enabled
-        ? 'New checkout duplicates are merged into the older account with the same phone, about 10 minutes after the order.'
+        ? `Orders placed since ${esc(fmtTime(a.at))} are merged into the older account with the same phone, about 10 minutes after the order. Older duplicates: scan the store and review them here.`
         : 'New orders are not merged automatically. Duplicates show up here after the next scan.'} ${changed}</div>
       ${S.meta.autoMergeOnlyPhones?.length ? `<div class="meta"><strong>Test mode:</strong> only orders with phone ${esc(S.meta.autoMergeOnlyPhones.join(', '))} are merged automatically; all other orders are skipped.</div>` : ''}
     </div>
@@ -529,7 +529,7 @@ function confirmAuto() {
     <h2>Turn on automatic merging?</h2>
     <p>Every few minutes the tool will merge a new customer into an older customer with the <strong>same phone number</strong>.
     It doesn't compare names, so a family member or gift order using someone else's phone will also be merged.</p>
-    <p>It starts with orders from the last ${esc(S.meta.lookbackHours)} hours, including ones placed while it was off.</p>
+    <p>Only orders placed <strong>from now on</strong> are merged automatically. Earlier orders, including ones placed while it was off, are never merged automatically: scan the store to review those duplicates here.</p>
     ${S.meta.autoMergeOnlyPhones?.length ? `<p><strong>Test mode:</strong> only orders with phone ${esc(S.meta.autoMergeOnlyPhones.join(', '))} will be merged. Every other order is skipped.</p>` : ''}
     ${S.meta.dryRun ? '<p><strong>Practice mode:</strong> merges are only simulated.</p>' : '<p>Shopify can\'t undo a merge.</p>'}
     <div class="dlg-actions">
