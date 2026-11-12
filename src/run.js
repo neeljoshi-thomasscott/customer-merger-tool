@@ -3,6 +3,7 @@ import { iterateOrders, sleep } from './shopify.js';
 import { processOrder } from './processOrder.js';
 import { processPendingPoints } from './points.js';
 import { loadState, saveState, logAction, logAttention, recordHistory, getAutoMerge } from './store.js';
+import { runStatus } from './status.js';
 
 async function cycle() {
   const state = loadState();
@@ -15,7 +16,7 @@ async function cycle() {
   const to = new Date(now - config.minOrderAgeMinutes * 60 * 1000).toISOString();
   const query = `created_at:>='${from}' AND created_at:<='${to}'`;
 
-  const counts = { checked: 0, skipped: 0, acted: 0, errors: 0 };
+  const counts = { checked: 0, skipped: 0, acted: 0, merged: 0, errors: 0 };
   console.log(`\n[${new Date().toISOString()}] ${config.dryRun ? 'DRY RUN' : 'LIVE'}: orders ${from} -> ${to}`);
 
   // Stage 1 runs only while automatic merging is switched on in the dashboard.
@@ -43,10 +44,11 @@ async function cycle() {
         state.processed[order.id] = { at: new Date().toISOString(), status: r.status };
         if (r.pending && config.flits.enabled) state.pendingPoints[order.id] = r.pending;
         if (r.status === 'merged') {
+          counts.merged++;
           recordHistory({
             actor: 'automatic', source: 'new order', status: 'merged', risk: 'low', phone: r.phone,
             message: `Merged after order ${order.name}; points move after delivery`, pointsMoved: 0,
-            dup: { id: r.newId, name: '', email: '' }, keep: { id: r.keepId, name: '', email: '' },
+            dup: { id: r.newId, ...r.dupInfo }, keep: { id: r.keepId, ...r.keepInfo },
           });
         }
         saveState(state);
@@ -64,6 +66,7 @@ async function cycle() {
   const pts = await processPendingPoints(state);
   if (!config.dryRun) saveState(state);
   console.log(`  points: waiting for delivery ${pts.waiting}, moved ${pts.moved}, closed ${pts.closed}, errors ${pts.errors}`);
+  return { checked: counts.checked, merged: counts.merged, errors: counts.errors + pts.errors };
 }
 
 async function main() {
@@ -72,12 +75,19 @@ async function main() {
     return;
   }
   for (;;) {
+    runStatus.running = true;
+    runStatus.nextRunAt = null;
     try {
-      await cycle();
+      runStatus.last = await cycle();
     } catch (err) {
       console.error('Run failed:', err.message);
+      runStatus.last = { checked: 0, merged: 0, errors: 1 };
     }
-    await sleep(config.pollIntervalMinutes * 60 * 1000);
+    const wait = config.pollIntervalMinutes * 60 * 1000;
+    runStatus.running = false;
+    runStatus.lastRunAt = new Date().toISOString();
+    runStatus.nextRunAt = new Date(Date.now() + wait).toISOString();
+    await sleep(wait);
   }
 }
 

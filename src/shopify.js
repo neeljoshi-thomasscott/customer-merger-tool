@@ -65,6 +65,8 @@ export async function gql(query, variables = {}) {
 const CUSTOMER_FIELDS = `
   id
   createdAt
+  firstName
+  lastName
   numberOfOrders
   defaultPhoneNumber { phoneNumber }
   defaultEmailAddress { emailAddress }

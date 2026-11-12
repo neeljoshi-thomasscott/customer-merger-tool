@@ -13,6 +13,32 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { fetchAllCustomers, buildPlan, checkPairs, mergePair } from './mergeService.js';
 import { readHistory, loadJson, saveJson, getAutoMerge, setAutoMerge } from './store.js';
+import { runStatus } from './status.js';
+
+// Automatic merges counted from the merge history, by Indian date.
+const istDay = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+function autoStatus() {
+  const auto = getAutoMerge();
+  const merges = readHistory(5000).filter((h) => h.actor === 'automatic' && h.status === 'merged');
+  const today = istDay(Date.now());
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+  return {
+    ...auto,
+    merged: {
+      today: merges.filter((h) => istDay(h.at) === today).length,
+      week: merges.filter((h) => Date.parse(h.at) >= weekAgo).length,
+      sinceOn: auto.at ? merges.filter((h) => Date.parse(h.at) >= Date.parse(auto.at)).length : 0,
+      lastAt: merges[0]?.at || null,
+    },
+    run: {
+      ...runStatus,
+      // Milliseconds until the next check, so the page's timer doesn't depend on the viewer's clock.
+      nextInMs: runStatus.nextRunAt ? Math.max(0, Date.parse(runStatus.nextRunAt) - Date.now()) : null,
+    },
+    minOrderAgeMinutes: config.minOrderAgeMinutes,
+    pollIntervalMinutes: config.pollIntervalMinutes,
+  };
+}
 
 const HTML_PATH = fileURLToPath(new URL('./dashboard.html', import.meta.url));
 const MAX_BULK = 500;
@@ -180,7 +206,7 @@ async function handle(req, res) {
         adminBase: `https://admin.shopify.com/store/${shopHandle}`,
         dryRun: config.dryRun,
         flitsEnabled: config.flits.enabled,
-        autoMerge: getAutoMerge(),
+        autoMerge: autoStatus(),
         lookbackHours: config.lookbackHours,
         autoMergeOnlyPhones: config.autoMergeOnlyPhones,
       });
@@ -190,8 +216,11 @@ async function handle(req, res) {
       if (typeof body.enabled !== 'boolean') return send(res, 400, { error: 'enabled must be true or false' });
       const s = setAutoMerge(body.enabled, user);
       console.log(`Automatic merging turned ${s.enabled ? 'ON' : 'OFF'} by ${user}`);
-      return send(res, 200, getAutoMerge());
+      return send(res, 200, autoStatus());
     }
+
+    case 'GET /api/auto-status':
+      return send(res, 200, autoStatus());
 
     case 'GET /api/plan':
       return send(res, 200, plan || { scannedAt: null, pairs: [] });

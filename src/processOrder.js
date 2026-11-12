@@ -114,8 +114,14 @@ async function doMerge(order, current, keep, override, base) {
     mergedAt: new Date().toISOString(),
     errors: 0,
   };
+  const info = (c) => ({
+    name: [c.firstName, c.lastName].filter(Boolean).join(' '),
+    email: c.defaultEmailAddress?.emailAddress || '',
+  });
   return {
     ...base,
+    dupInfo: info(current),
+    keepInfo: info(keep),
     status: 'merged',
     details: `${result.jobDone ? 'merged' : 'merge job still running'}; points will be moved after delivery`,
     pending,

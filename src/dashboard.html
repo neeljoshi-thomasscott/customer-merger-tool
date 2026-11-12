@@ -85,6 +85,14 @@ a.btn { text-decoration: none; color: var(--ink); display: inline-block; }
 .auto .state.on { color: var(--low); }
 .auto .state.off { color: var(--muted); }
 .auto .meta { color: var(--muted); font-size: 13px; }
+.auto-main { flex: 1 1 420px; }
+.auto-stats { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.auto .stat { display: flex; flex-direction: column; min-width: 92px; padding: 6px 12px; border-radius: 8px; background: var(--bg); }
+.auto .stat[hidden] { display: none; }
+.auto .stat b { font-size: 20px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.auto .stat span { color: var(--muted); font-size: 12px; }
+.auto .stat.timer b { color: var(--accent); }
+.auto > .meta#autoLast { flex-basis: 100%; }
 
 /* Full-screen loading while merging */
 .overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
@@ -510,17 +518,69 @@ $('bulkMerge').addEventListener('click', () => confirmMerge(selectedPairs()));
 function renderAuto() {
   const a = S.meta.autoMerge;
   const changed = a.at ? `Turned ${a.enabled ? 'on' : 'off'} by ${esc(a.by)}, ${fmtTime(a.at)}.` : 'Off until someone turns it on.';
+  const m = a.merged || {};
+  const stats = `
+    <div class="auto-stats">
+      <div class="stat"><b>${m.today ?? 0}</b><span>merged today</span></div>
+      <div class="stat"><b>${m.week ?? 0}</b><span>last 7 days</span></div>
+      ${a.enabled ? `<div class="stat"><b>${m.sinceOn ?? 0}</b><span>since turned on</span></div>` : ''}
+      <div class="stat timer"><b id="autoTimer">–</b><span id="autoTimerLabel">next check</span></div>
+      <button class="btn quiet" type="button" id="autoHistory">See merges</button>
+    </div>
+    <div class="meta" id="autoLast"></div>`;
   $('auto').innerHTML = `
-    <div>
+    <div class="auto-main">
       <div>Automatic merge after new orders: <span class="state ${a.enabled ? 'on' : 'off'}">${a.enabled ? 'ON' : 'OFF'}</span></div>
       <div class="meta">${a.enabled
         ? `Orders placed since ${esc(fmtTime(a.at))} are merged into the older account with the same phone, about 10 minutes after the order. Older duplicates: scan the store and review them here.`
         : 'New orders are not merged automatically. Duplicates show up here after the next scan.'} ${changed}</div>
       ${S.meta.autoMergeOnlyPhones?.length ? `<div class="meta"><strong>Test mode:</strong> only orders with phone ${esc(S.meta.autoMergeOnlyPhones.join(', '))} are merged automatically; all other orders are skipped.</div>` : ''}
     </div>
-    <button class="btn ${a.enabled ? '' : 'primary'}" type="button" id="autoBtn">${a.enabled ? 'Turn off' : 'Turn on'}</button>`;
+    <button class="btn ${a.enabled ? '' : 'primary'}" type="button" id="autoBtn">${a.enabled ? 'Turn off' : 'Turn on'}</button>
+    ${stats}`;
   $('auto').hidden = false;
   $('autoBtn').addEventListener('click', confirmAuto);
+  $('autoHistory').addEventListener('click', () => document.getElementById('tab-history').click());
+  startAutoTimer();
+}
+
+// Counts down to the merger's next check, then reloads the status (and the Merged list) once it has run.
+function startAutoTimer() {
+  clearInterval(S.autoTimer);
+  const r = S.meta.autoMerge.run || {};
+  const timerBox = document.querySelector('.stat.timer');
+  if (!r.lastRunAt && !r.running) { timerBox.hidden = true; return; } // merger not running in this process
+  const target = r.nextInMs == null ? null : Date.now() + r.nextInMs;
+  const last = r.last;
+  $('autoLast').textContent = r.lastRunAt
+    ? `Last check ${fmtTime(r.lastRunAt)}: ${last ? `${last.checked} new order${last.checked === 1 ? '' : 's'} checked, ${last.merged} merged${last.errors ? `, ${last.errors} error${last.errors === 1 ? '' : 's'}` : ''}` : ''}.`
+      + ` An order is checked once it's ${S.meta.autoMerge.minOrderAgeMinutes} minutes old, so a merge shows up within about ${S.meta.autoMerge.minOrderAgeMinutes + S.meta.autoMerge.pollIntervalMinutes} minutes of the order.`
+    : '';
+  const tick = () => {
+    const left = target == null ? 0 : Math.max(0, Math.round((target - Date.now()) / 1000));
+    if (r.running || left === 0) {
+      $('autoTimer').textContent = '…';
+      $('autoTimerLabel').textContent = 'checking now';
+      clearInterval(S.autoTimer);
+      S.autoTimer = setTimeout(refreshAuto, 5000);
+      return;
+    }
+    $('autoTimer').textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    $('autoTimerLabel').textContent = 'next check, then this refreshes';
+  };
+  tick();
+  if (target != null && !r.running) S.autoTimer = setInterval(tick, 1000);
+}
+
+async function refreshAuto() {
+  try {
+    S.meta.autoMerge = await api('/api/auto-status');
+  } catch {
+    S.autoTimer = setTimeout(refreshAuto, 10000);
+    return;
+  }
+  renderAuto();
+  if (S.tab === 'history') loadHistory();
 }
 
 function confirmAuto() {
