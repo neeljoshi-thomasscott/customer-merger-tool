@@ -101,7 +101,7 @@ async function doMerge(order, current, keep, override, base) {
     orderId: order.id, orderName: order.name,
     dupId: base.newId, dupLabel: current.defaultEmailAddress?.emailAddress || '',
     keepId: base.keepId, by: 'automatic merge',
-    pointsText: config.flits.enabled ? 'Flits points are checked 60 minutes after delivery.' : '',
+    pointsText: config.flits.enabled ? `Flits points are checked ${config.pointsDelayAfterDeliveryMinutes} minutes after delivery.` : '',
   });
 
   // Remember this merge so stage 2 moves the duplicate's Flits points after delivery.
