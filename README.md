@@ -33,6 +33,11 @@ Cancelled orders are closed without moving points. Orders not delivered within 3
 
 Nothing changes while `DRY_RUN=true`.
 
+**Stage 1 runs once a day at 11:00 am India time** (`AUTO_MERGE_TIME`, `HH:MM`; set it to empty to merge on every
+check instead). It handles all new orders since the previous run in one go; if the service was down at that time, it
+runs as soon as it's back that day, and never twice a day. Stage 2 (Flits points) still runs every
+`POLL_INTERVAL_MINUTES`. The dashboard shows a countdown to the next run.
+
 **Stage 1 is off by default.** Turn it on or off with the *Automatic merge after new orders* switch at the top
 of the dashboard. The setting is saved on the Volume (`data/settings.json`), so it survives redeploys, and takes
 effect on the next run without a redeploy. Only orders placed **after** it was last turned on are merged

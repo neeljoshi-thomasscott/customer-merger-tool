@@ -6,4 +6,5 @@ export const runStatus = {
   lastRunAt: null,   // when the last check finished
   nextRunAt: null,   // when the next check starts
   last: null,        // { checked, merged, errors } from the last check
+  lastMerge: null,   // { at, checked, merged, errors } from the last scheduled merge run
 };

@@ -4,6 +4,7 @@ import { processOrder } from './processOrder.js';
 import { processPendingPoints } from './points.js';
 import { loadState, saveState, logAction, logAttention, recordHistory, getAutoMerge } from './store.js';
 import { runStatus } from './status.js';
+import { mergeDue, markMergeRun, nextMergeAt, mergeTime, mergeTimeLabel } from './schedule.js';
 
 async function cycle() {
   const state = loadState();
@@ -19,12 +20,15 @@ async function cycle() {
   const counts = { checked: 0, skipped: 0, acted: 0, merged: 0, errors: 0 };
   console.log(`\n[${new Date().toISOString()}] ${config.dryRun ? 'DRY RUN' : 'LIVE'}: orders ${from} -> ${to}`);
 
-  // Stage 1 runs only while automatic merging is switched on in the dashboard.
+  // Stage 1 runs only while automatic merging is switched on in the dashboard, and (with
+  // AUTO_MERGE_TIME) only once a day at that time.
   const autoOn = auto.enabled;
+  const due = autoOn && mergeDue(now);
   if (!autoOn) console.log('  merge: automatic merging is OFF (turn it on in the dashboard)');
+  else if (!due) console.log(`  merge: next run ${mergeTimeLabel()} India time (${nextMergeAt(now)})`);
   else if (config.autoMergeOnlyPhones.length) console.log(`  merge: TEST MODE, only orders with phone ${config.autoMergeOnlyPhones.join(', ')}`);
 
-  if (autoOn) for await (const order of iterateOrders(query)) {
+  if (due) for await (const order of iterateOrders(query)) {
     if (!getAutoMerge().enabled) { console.log('  merge: switched OFF during this run, stopping'); break; }
     if (state.processed[order.id]) continue;
     counts.checked++;
@@ -61,6 +65,11 @@ async function cycle() {
   }
 
   console.log(`  merge: checked ${counts.checked}, no action ${counts.skipped}, actions ${counts.acted}, errors ${counts.errors}`);
+  // Today's scheduled run is done (in practice mode too, so the schedule behaves the same).
+  if (due && mergeTime && getAutoMerge().enabled) {
+    markMergeRun(new Date(now));
+    runStatus.lastMerge = { at: new Date(now).toISOString(), checked: counts.checked, merged: counts.merged, errors: counts.errors };
+  }
 
   // Stage 2: move Flits points for merged orders that have been delivered.
   const pts = await processPendingPoints(state);

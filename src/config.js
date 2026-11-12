@@ -62,6 +62,10 @@ export const config = {
 
   pollIntervalMinutes: num(process.env.POLL_INTERVAL_MINUTES, 5),
 
+  // Automatic merging runs once a day at this India time (HH:MM). Empty = on every check instead.
+  // Flits points are still checked every POLL_INTERVAL_MINUTES.
+  autoMergeTime: process.env.AUTO_MERGE_TIME === undefined ? '11:00' : process.env.AUTO_MERGE_TIME.trim(),
+
   // Testing: when set (comma separated), the automatic merger only acts on orders with one of these
   // phone numbers and skips every other order. Leave empty for normal use.
   autoMergeOnlyPhones: String(process.env.AUTO_MERGE_ONLY_PHONES || '').split(',').map((p) => p.trim()).filter(Boolean),
