@@ -143,6 +143,7 @@ body.busy { overflow: hidden; }
 
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
 .search { flex: 1 1 260px; max-width: 420px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.pickbox { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; max-width: 100%; }
 
 /* Pair list */
 .list { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
@@ -259,6 +260,22 @@ dialog::backdrop { background: rgba(10, 14, 25, .45); }
   <section id="view-review" role="tabpanel" aria-labelledby="tab-review">
     <div class="toolbar">
       <input class="search" id="search" type="search" placeholder="Search name, email, phone or customer ID" aria-label="Search">
+      <select class="pickbox" id="orderFilter" aria-label="Filter by orders">
+        <option value="all">All order counts</option>
+        <option value="both0">Both accounts: 0 orders</option>
+        <option value="dupOnly">Only duplicate has orders</option>
+        <option value="keepOnly">Only account kept has orders</option>
+        <option value="both">Both accounts have orders</option>
+        <option value="any0">At least one account: 0 orders</option>
+      </select>
+      <select class="pickbox" id="sortBy" aria-label="Sort">
+        <option value="default">Sort: risk (default)</option>
+        <option value="ordersAsc">Sort: fewest orders first</option>
+        <option value="ordersDesc">Sort: most orders first</option>
+        <option value="pointsDesc">Sort: most points first</option>
+        <option value="newest">Sort: newest duplicate first</option>
+        <option value="oldest">Sort: oldest duplicate first</option>
+      </select>
       <button class="btn" id="selLow" type="button">Select all low risk</button>
       <button class="btn" id="selMedium" type="button">Select all medium risk</button>
     </div>
@@ -296,7 +313,7 @@ dialog::backdrop { background: rgba(10, 14, 25, .45); }
 </div>
 
 <script>
-const S = { meta: null, plan: { pairs: [] }, filter: 'all', q: '', selected: new Set(), shown: 200, tab: 'review', polling: null };
+const S = { meta: null, plan: { pairs: [] }, filter: 'all', q: '', orders: 'all', sort: 'default', selected: new Set(), shown: 200, tab: 'review', polling: null };
 const RISK = {
   low: { label: 'Low risk', note: 'Can be merged in bulk' },
   medium: { label: 'Medium risk', note: 'Check, then bulk merge' },
@@ -385,12 +402,31 @@ $('stripNote').addEventListener('click', (e) => {
 // ---------- Pair list ----------
 function visiblePairs() {
   const q = S.q.trim().toLowerCase().replace(/\s+/g, '');
-  return S.plan.pairs.filter((p) => {
+  const ORDERS = {
+    all: () => true,
+    both0: (d, k) => d === 0 && k === 0,
+    dupOnly: (d, k) => d > 0 && k === 0,
+    keepOnly: (d, k) => d === 0 && k > 0,
+    both: (d, k) => d > 0 && k > 0,
+    any0: (d, k) => d === 0 || k === 0,
+  };
+  const list = S.plan.pairs.filter((p) => {
     if (S.filter !== 'all' && p.risk !== S.filter) return false;
+    if (!(ORDERS[S.orders] || ORDERS.all)(Number(p.dup.orders) || 0, Number(p.keep.orders) || 0)) return false;
     if (!q) return true;
     const hay = [p.phone, p.dup.name, p.dup.email, p.dup.id, p.keep.name, p.keep.email, p.keep.id].join('|').toLowerCase().replace(/\s+/g, '');
     return hay.includes(q);
   });
+  const total = (p) => (Number(p.dup.orders) || 0) + (Number(p.keep.orders) || 0);
+  const made = (p) => Date.parse(p.dup.createdAt) || 0;
+  const SORTS = {
+    ordersAsc: (a, b) => total(a) - total(b),
+    ordersDesc: (a, b) => total(b) - total(a),
+    pointsDesc: (a, b) => (Number(b.points) || 0) - (Number(a.points) || 0),
+    newest: (a, b) => made(b) - made(a),
+    oldest: (a, b) => made(a) - made(b),
+  };
+  return SORTS[S.sort] ? list.sort(SORTS[S.sort]) : list; // filter() made a copy, so sorting is safe
 }
 
 function nameHtml(acct, other) {
@@ -469,6 +505,8 @@ function renderList() {
 }
 
 $('search').addEventListener('input', (e) => { S.q = e.target.value; S.shown = 200; renderList(); });
+$('orderFilter').addEventListener('change', (e) => { S.orders = e.target.value; S.shown = 200; renderList(); });
+$('sortBy').addEventListener('change', (e) => { S.sort = e.target.value; S.shown = 200; renderList(); });
 
 $('list').addEventListener('change', (e) => {
   const key = e.target.dataset?.key;
