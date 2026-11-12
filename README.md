@@ -33,6 +33,12 @@ Cancelled orders are closed without moving points. Orders not delivered within 3
 
 Nothing changes while `DRY_RUN=true`.
 
+**Stage 1 is off by default.** Turn it on or off with the *Automatic merge after new orders* switch at the top
+of the dashboard. The setting is saved on the Volume (`data/settings.json`), so it survives redeploys, and takes
+effect on the next run without a redeploy. While it's off, orders aren't marked as handled, so when it's turned on
+again the tool also merges orders from the last `LOOKBACK_HOURS`. Stage 2 (points after delivery) keeps running
+either way, for merges that already happened.
+
 ## Deploy on Railway
 
 On Railway, the automatic merger and the dashboard run together as **one service** with **one Volume**.

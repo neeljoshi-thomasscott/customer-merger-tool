@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { fetchAllCustomers, buildPlan, checkPairs, mergePair } from './mergeService.js';
-import { readHistory, loadJson, saveJson } from './store.js';
+import { readHistory, loadJson, saveJson, getAutoMerge, setAutoMerge } from './store.js';
 
 const HTML_PATH = fileURLToPath(new URL('./dashboard.html', import.meta.url));
 const MAX_BULK = 500;
@@ -178,7 +178,17 @@ async function handle(req, res) {
         adminBase: `https://admin.shopify.com/store/${shopHandle}`,
         dryRun: config.dryRun,
         flitsEnabled: config.flits.enabled,
+        autoMerge: getAutoMerge(),
+        lookbackHours: config.lookbackHours,
       });
+
+    case 'POST /api/auto-merge': {
+      const body = await readBody(req);
+      if (typeof body.enabled !== 'boolean') return send(res, 400, { error: 'enabled must be true or false' });
+      const s = setAutoMerge(body.enabled, user);
+      console.log(`Automatic merging turned ${s.enabled ? 'ON' : 'OFF'} by ${user}`);
+      return send(res, 200, getAutoMerge());
+    }
 
     case 'GET /api/plan':
       return send(res, 200, plan || { scannedAt: null, pairs: [] });

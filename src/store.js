@@ -91,6 +91,20 @@ export function saveJson(name, value) {
   fs.renameSync(p + '.tmp', p);
 }
 
+// ---------- Settings changed from the dashboard ----------
+// Automatic merging is OFF unless someone turned it on in the dashboard.
+export function getAutoMerge() {
+  const s = loadJson('settings.json', {}).autoMerge;
+  return { enabled: s?.enabled === true, by: s?.by || '', at: s?.at || '' };
+}
+
+export function setAutoMerge(enabled, by) {
+  const settings = loadJson('settings.json', {});
+  settings.autoMerge = { enabled: enabled === true, by, at: new Date().toISOString() };
+  saveJson('settings.json', settings);
+  return settings.autoMerge;
+}
+
 // ---------- Points already moved, per duplicate customer ----------
 // Read fresh from disk and written back in the same synchronous step, so the automatic merger and
 // the dashboard (same process) can never overwrite each other's record. This is what prevents

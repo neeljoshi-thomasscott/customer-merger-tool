@@ -78,6 +78,13 @@ a.btn { text-decoration: none; color: var(--ink); display: inline-block; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 
 .banner { border: 1px solid var(--medium); background: var(--medium-bg); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; }
+.auto { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; }
+.auto[hidden] { display: none; }
+.auto .state { font-weight: 600; }
+.auto .state.on { color: var(--low); }
+.auto .state.off { color: var(--muted); }
+.auto .meta { color: var(--muted); font-size: 13px; }
 
 /* Task progress */
 .task { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
@@ -212,6 +219,8 @@ dialog::backdrop { background: rgba(10, 14, 25, .45); }
     Practice mode is on (<code>DRY_RUN=true</code>). Merges are only checked and simulated; no customer or points change.
   </div>
 
+  <div class="auto" id="auto" hidden></div>
+
   <section class="task" id="task" hidden aria-live="polite"></section>
 
   <div class="strip" id="strip" role="group" aria-label="Filter by risk"></div>
@@ -284,6 +293,7 @@ async function api(path, body) {
 async function init() {
   S.meta = await api('/api/meta');
   $('practice').hidden = !S.meta.dryRun;
+  renderAuto();
   await loadPlan();
   const t = await api('/api/task');
   if (t.status) renderTask(t);
@@ -468,6 +478,51 @@ function renderBulk() {
 }
 $('clearSel').addEventListener('click', () => { S.selected.clear(); renderList(); renderBulk(); });
 $('bulkMerge').addEventListener('click', () => confirmMerge(selectedPairs()));
+
+// ---------- Automatic merging switch ----------
+function renderAuto() {
+  const a = S.meta.autoMerge;
+  const changed = a.at ? `Turned ${a.enabled ? 'on' : 'off'} by ${esc(a.by)}, ${fmtTime(a.at)}.` : 'Off until someone turns it on.';
+  $('auto').innerHTML = `
+    <div>
+      <div>Automatic merge after new orders: <span class="state ${a.enabled ? 'on' : 'off'}">${a.enabled ? 'ON' : 'OFF'}</span></div>
+      <div class="meta">${a.enabled
+        ? 'New checkout duplicates are merged into the older account with the same phone, about 10 minutes after the order.'
+        : 'New orders are not merged automatically. Duplicates show up here after the next scan.'} ${changed}</div>
+    </div>
+    <button class="btn ${a.enabled ? '' : 'primary'}" type="button" id="autoBtn">${a.enabled ? 'Turn off' : 'Turn on'}</button>`;
+  $('auto').hidden = false;
+  $('autoBtn').addEventListener('click', confirmAuto);
+}
+
+function confirmAuto() {
+  const on = !S.meta.autoMerge.enabled;
+  openDialog(on ? `
+    <h2>Turn on automatic merging?</h2>
+    <p>Every few minutes the tool will merge a new customer into an older customer with the <strong>same phone number</strong>.
+    It doesn't compare names, so a family member or gift order using someone else's phone will also be merged.</p>
+    <p>It starts with orders from the last ${esc(S.meta.lookbackHours)} hours, including ones placed while it was off.</p>
+    ${S.meta.dryRun ? '<p><strong>Practice mode:</strong> merges are only simulated.</p>' : '<p>Shopify can\'t undo a merge.</p>'}
+    <div class="dlg-actions">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn primary" type="button" id="goAuto">Turn on</button>
+    </div>` : `
+    <h2>Turn off automatic merging?</h2>
+    <p>New orders won't be merged automatically. Merges already done stay as they are, and Flits points for them still move after delivery.</p>
+    <div class="dlg-actions">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn primary" type="button" id="goAuto">Turn off</button>
+    </div>`);
+  $('goAuto').addEventListener('click', async () => {
+    try {
+      S.meta.autoMerge = await api('/api/auto-merge', { enabled: on });
+      closeDialog();
+      renderAuto();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+}
 
 // ---------- Dialogs ----------
 function openDialog(html) {

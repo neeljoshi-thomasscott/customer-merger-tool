@@ -2,7 +2,7 @@ import { config } from './config.js';
 import { iterateOrders, sleep } from './shopify.js';
 import { processOrder } from './processOrder.js';
 import { processPendingPoints } from './points.js';
-import { loadState, saveState, logAction, logAttention, recordHistory } from './store.js';
+import { loadState, saveState, logAction, logAttention, recordHistory, getAutoMerge } from './store.js';
 
 async function cycle() {
   const state = loadState();
@@ -14,7 +14,12 @@ async function cycle() {
   const counts = { checked: 0, skipped: 0, acted: 0, errors: 0 };
   console.log(`\n[${new Date().toISOString()}] ${config.dryRun ? 'DRY RUN' : 'LIVE'}: orders ${from} -> ${to}`);
 
-  for await (const order of iterateOrders(query)) {
+  // Stage 1 runs only while automatic merging is switched on in the dashboard.
+  // Orders are not marked as handled while it's off, so they're picked up once it's on again.
+  if (!getAutoMerge().enabled) {
+    console.log('  merge: automatic merging is OFF (turn it on in the dashboard)');
+  } else for await (const order of iterateOrders(query)) {
+    if (!getAutoMerge().enabled) { console.log('  merge: switched OFF during this run, stopping'); break; }
     if (state.processed[order.id]) continue;
     counts.checked++;
     try {
