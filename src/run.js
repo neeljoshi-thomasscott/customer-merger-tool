@@ -16,9 +16,11 @@ async function cycle() {
 
   // Stage 1 runs only while automatic merging is switched on in the dashboard.
   // Orders are not marked as handled while it's off, so they're picked up once it's on again.
-  if (!getAutoMerge().enabled) {
-    console.log('  merge: automatic merging is OFF (turn it on in the dashboard)');
-  } else for await (const order of iterateOrders(query)) {
+  const autoOn = getAutoMerge().enabled;
+  if (!autoOn) console.log('  merge: automatic merging is OFF (turn it on in the dashboard)');
+  else if (config.autoMergeOnlyPhones.length) console.log(`  merge: TEST MODE, only orders with phone ${config.autoMergeOnlyPhones.join(', ')}`);
+
+  if (autoOn) for await (const order of iterateOrders(query)) {
     if (!getAutoMerge().enabled) { console.log('  merge: switched OFF during this run, stopping'); break; }
     if (state.processed[order.id]) continue;
     counts.checked++;
@@ -33,7 +35,8 @@ async function cycle() {
         if (r.attention) logAttention(order, r);
       }
       // In dry run nothing is remembered, so the live run re-checks the same orders.
-      if (!config.dryRun) {
+      // Orders skipped only by the test filter stay unhandled, so they're merged once test mode is removed.
+      if (!config.dryRun && !r.retryLater) {
         state.processed[order.id] = { at: new Date().toISOString(), status: r.status };
         if (r.pending && config.flits.enabled) state.pendingPoints[order.id] = r.pending;
         if (r.status === 'merged') {

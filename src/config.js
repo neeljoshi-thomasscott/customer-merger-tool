@@ -62,6 +62,10 @@ export const config = {
 
   pollIntervalMinutes: num(process.env.POLL_INTERVAL_MINUTES, 5),
 
+  // Testing: when set (comma separated), the automatic merger only acts on orders with one of these
+  // phone numbers and skips every other order. Leave empty for normal use.
+  autoMergeOnlyPhones: String(process.env.AUTO_MERGE_ONLY_PHONES || '').split(',').map((p) => p.trim()).filter(Boolean),
+
   // On Railway, the attached Volume's mount path is used automatically.
   dataDir: process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || './data',
   onRailway: Boolean(process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID),

@@ -30,6 +30,12 @@ export async function processOrder(order) {
   const uniquePhones = [...new Set(phones)];
   if (!uniquePhones.length) return skipped('no phone number on order');
 
+  // Testing filter: only touch orders with one of the allowed phone numbers.
+  if (config.autoMergeOnlyPhones.length) {
+    const allowed = config.autoMergeOnlyPhones.map((p) => normalizePhone(p, config.countryCode));
+    if (!uniquePhones.some((p) => allowed.includes(p))) return { ...skipped('not a test phone number'), retryLater: true };
+  }
+
   // 3. Find an OLDER customer whose phone exactly matches.
   const matches = new Map();
   for (const phone of uniquePhones) {

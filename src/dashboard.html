@@ -516,6 +516,7 @@ function renderAuto() {
       <div class="meta">${a.enabled
         ? 'New checkout duplicates are merged into the older account with the same phone, about 10 minutes after the order.'
         : 'New orders are not merged automatically. Duplicates show up here after the next scan.'} ${changed}</div>
+      ${S.meta.autoMergeOnlyPhones?.length ? `<div class="meta"><strong>Test mode:</strong> only orders with phone ${esc(S.meta.autoMergeOnlyPhones.join(', '))} are merged automatically; all other orders are skipped.</div>` : ''}
     </div>
     <button class="btn ${a.enabled ? '' : 'primary'}" type="button" id="autoBtn">${a.enabled ? 'Turn off' : 'Turn on'}</button>`;
   $('auto').hidden = false;
@@ -529,6 +530,7 @@ function confirmAuto() {
     <p>Every few minutes the tool will merge a new customer into an older customer with the <strong>same phone number</strong>.
     It doesn't compare names, so a family member or gift order using someone else's phone will also be merged.</p>
     <p>It starts with orders from the last ${esc(S.meta.lookbackHours)} hours, including ones placed while it was off.</p>
+    ${S.meta.autoMergeOnlyPhones?.length ? `<p><strong>Test mode:</strong> only orders with phone ${esc(S.meta.autoMergeOnlyPhones.join(', '))} will be merged. Every other order is skipped.</p>` : ''}
     ${S.meta.dryRun ? '<p><strong>Practice mode:</strong> merges are only simulated.</p>' : '<p>Shopify can\'t undo a merge.</p>'}
     <div class="dlg-actions">
       <button class="btn" type="button" data-close>Cancel</button>

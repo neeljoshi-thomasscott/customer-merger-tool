@@ -182,6 +182,7 @@ async function handle(req, res) {
         flitsEnabled: config.flits.enabled,
         autoMerge: getAutoMerge(),
         lookbackHours: config.lookbackHours,
+        autoMergeOnlyPhones: config.autoMergeOnlyPhones,
       });
 
     case 'POST /api/auto-merge': {
