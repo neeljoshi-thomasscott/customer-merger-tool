@@ -73,6 +73,7 @@ function merge(keys, by) {
     t.phase = config.dryRun ? 'Practice merge' : 'Merging';
     for (const key of keys) {
       const pair = plan.pairs.find((p) => p.key === key);
+      t.current = pair ? { dup: pair.dup.name || pair.dup.email, keep: pair.keep.name || pair.keep.email } : null;
       let r;
       if (!pair) {
         r = { ok: false, status: 'skipped', message: 'No longer in the list (merged or rescanned)' };
@@ -95,6 +96,7 @@ function merge(keys, by) {
       t.results.push({ key, dup: pair?.dup.name || '', keep: pair?.keep.name || '', ...r });
       t.done++;
     }
+    t.current = null;
   });
 }
 

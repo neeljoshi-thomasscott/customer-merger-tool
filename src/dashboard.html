@@ -86,6 +86,22 @@ a.btn { text-decoration: none; color: var(--ink); display: inline-block; }
 .auto .state.off { color: var(--muted); }
 .auto .meta { color: var(--muted); font-size: 13px; }
 
+/* Full-screen loading while merging */
+.overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(10, 14, 25, .55); }
+.overlay[hidden] { display: none; }
+.ov-box { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px;
+  padding: 28px 24px; width: min(440px, 100%); text-align: center; }
+.ov-box h2 { margin: 14px 0 6px; font-size: 19px; }
+.ov-status { font-size: 15px; margin: 0 0 4px; font-variant-numeric: tabular-nums; }
+.ov-current { color: var(--muted); font-size: 13.5px; min-height: 1.4em; margin: 10px 0 0; overflow-wrap: anywhere; }
+.ov-note { color: var(--muted); font-size: 12.5px; margin: 14px 0 0; }
+.spinner { width: 40px; height: 40px; margin: 0 auto; border-radius: 50%;
+  border: 4px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+body.busy { overflow: hidden; }
+
 /* Task progress */
 .task { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
 .task[hidden] { display: none; }
@@ -259,6 +275,17 @@ dialog::backdrop { background: rgba(10, 14, 25, .45); }
 </div>
 
 <dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
+
+<div class="overlay" id="overlay" hidden tabindex="-1" role="alertdialog" aria-modal="true" aria-labelledby="ovTitle" aria-describedby="ovStatus">
+  <div class="ov-box">
+    <div class="spinner" aria-hidden="true"></div>
+    <h2 id="ovTitle">Merging accounts…</h2>
+    <p class="ov-status" id="ovStatus" aria-live="polite">Starting</p>
+    <div class="bar"><i id="ovBar"></i></div>
+    <p class="ov-current" id="ovCurrent"></p>
+    <p class="ov-note">You can close this page; the merge keeps running on the server. Don't start another merge until it finishes.</p>
+  </div>
+</div>
 
 <script>
 const S = { meta: null, plan: { pairs: [] }, filter: 'all', q: '', selected: new Set(), shown: 200, tab: 'review', polling: null };
@@ -613,14 +640,37 @@ async function startScan() {
 $('scanBtn').addEventListener('click', startScan);
 
 async function runMerge(keys, confirmHighRisk) {
+  closeDialog();
+  showOverlay({ type: 'merge', status: 'running', phase: 'Starting', done: 0, total: keys.length });
   try {
     const t = await api('/api/merge', { keys, confirmHighRisk });
-    closeDialog();
     for (const k of keys) S.selected.delete(k);
     renderBulk();
     renderTask(t);
     poll();
-  } catch (err) { alert(err.message); }
+  } catch (err) {
+    hideOverlay();
+    alert(err.message);
+  }
+}
+
+function showOverlay(t) {
+  const n = t.total || 0;
+  const pct = n ? Math.round((t.done / n) * 100) : 0;
+  $('ovTitle').textContent = S.meta.dryRun ? 'Practice merge…' : (n === 1 ? 'Merging accounts…' : `Merging ${n} accounts…`);
+  $('ovStatus').textContent = t.phase === 'Starting' ? 'Starting…' : `${t.done} of ${n} done (${pct}%)`;
+  $('ovBar').style.width = `${Math.max(pct, 3)}%`;
+  $('ovCurrent').textContent = t.current ? `Now: ${t.current.dup} into ${t.current.keep}` : '';
+  if ($('overlay').hidden) {
+    $('overlay').hidden = false;
+    document.body.classList.add('busy');
+    $('overlay').focus?.();
+  }
+}
+
+function hideOverlay() {
+  $('overlay').hidden = true;
+  document.body.classList.remove('busy');
 }
 
 function poll() {
@@ -640,6 +690,8 @@ function poll() {
 }
 
 function renderTask(t) {
+  if (t.type === 'merge' && t.status === 'running') showOverlay(t);
+  else hideOverlay();
   const el = $('task');
   el.hidden = false;
   const what = t.type === 'scan' ? 'Scan' : (S.meta.dryRun ? 'Practice merge' : 'Merge');
