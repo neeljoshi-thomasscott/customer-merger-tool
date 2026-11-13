@@ -57,6 +57,11 @@ export async function registerOrderWebhook() {
   const uri = `${config.publicUrl}${WEBHOOK_PATH}`;
   wh.uri = uri;
   try {
+    // Shopify signs webhooks with the secret of the app that owns the subscription. Log which app
+    // that is (no secrets), so a signature mismatch can be traced.
+    const app = (await gql('{ currentAppInstallation { app { title apiKey } } }')).currentAppInstallation.app;
+    console.log(`webhook: connected as app "${app.title}"; client ID ${app.apiKey === config.clientId ? 'matches' : 'does NOT match'} SHOPIFY_CLIENT_ID`
+      + `${config.accessToken ? '; SHOPIFY_ACCESS_TOKEN is set' : ''}`);
     const existing = (await gql(Q_SUBS)).webhookSubscriptions.nodes;
     if (existing.some((s) => s.uri === uri)) {
       wh.ok = true;
