@@ -174,6 +174,12 @@ Shopify's merge preview and reads the Flits points to move. Pairs are rated:
 
 These rules are enforced by the server too, not just hidden in the screen.
 
+**Choosing the account to keep.** By default the older account is kept. When merging one pair, the dialog lets the
+team keep the **newer** account instead: the older account is then merged into it, its login phone is carried over
+(so the customer still logs in with their mobile number), and its Flits points are moved to the newer account's
+email. Shopify always keeps the account whose email is kept, so the kept account's email stays. If the newer account
+isn't known to Flits yet, the points can't be added and are listed in `needs-attention.csv` to add by hand.
+
 Other things the dashboard does:
 
 - **Not the same person** removes a pair for good (restorable from the *Not duplicates* tab).

@@ -743,26 +743,60 @@ function readEmailChoice(pairs) {
   return { emailPick };
 }
 
+// ---------- Which account to keep (one pair at a time) ----------
+function acctLine(a) {
+  return `${esc(a.name || 'No name')} <span class="meta">${esc(a.email || 'no email')}${isTemp(a.email) ? ' (temporary)' : ''},
+    ${a.orders} order${a.orders === 1 ? '' : 's'}, joined ${fmtDate(a.createdAt)}${a.loginPhone ? ', logs in with this phone' : ''}</span>`;
+}
+
+function keepChoiceHtml(p) {
+  return `<div class="emailpick">
+    <p><strong>Account to keep</strong></p>
+    <label class="confirm"><input type="radio" name="keepPick" value="older" checked> <span>${acctLine(p.keep)} <span class="meta">(older)</span></span></label>
+    <label class="confirm"><input type="radio" name="keepPick" value="newer"> <span>${acctLine(p.dup)} <span class="meta">(newer)</span></span></label>
+    <p class="meta" id="keepNote">The newer account is merged into the older one${S.meta.flitsEnabled ? '; its Flits points move to the older account' : ''}.</p>
+  </div>`;
+}
+
+/** Wires the keep choice: updates the note and hides the email choice when the newer account is kept. */
+function wireKeepChoice(p) {
+  document.querySelectorAll('input[name="keepPick"]').forEach((r) => r.addEventListener('change', () => {
+    const newer = document.querySelector('input[name="keepPick"]:checked')?.value === 'newer';
+    $('keepNote').textContent = newer
+      ? `The older account is merged into the newer one. Its orders and login phone move to the newer account${S.meta.flitsEnabled ? ', and its Flits points are moved to the newer account' : ''}.`
+      : `The newer account is merged into the older one${S.meta.flitsEnabled ? '; its Flits points move to the older account' : ''}.`;
+    if ($('emailBox')) $('emailBox').hidden = newer;
+    const [from, into] = newer ? [p.keep, p.dup] : [p.dup, p.keep];
+    if ($('mergeLine')) $('mergeLine').textContent = `${from.name || from.email} (${newer ? 'older' : 'newer'}) will be merged into ${into.name || into.email} (${fmtPhone(p.phone)}).`;
+  }));
+}
+
+function readKeepChoice(p) {
+  return document.querySelector('input[name="keepPick"]:checked')?.value === 'newer' ? { keepPick: { [p.key]: 'newer' } } : {};
+}
+
 function confirmMerge(pairs) {
   const pts = pairs.reduce((s, p) => s + (p.points || 0), 0);
   const one = pairs.length === 1 ? pairs[0] : null;
   openDialog(`
     <h2>${one ? 'Merge these accounts?' : `Merge ${pairs.length} duplicate accounts?`}</h2>
-    ${one ? `<p>${esc(one.dup.name || one.dup.email)} will be merged into ${esc(one.keep.name || one.keep.email)} (${esc(fmtPhone(one.phone))}).</p>` : ''}
+    ${one ? `<p id="mergeLine">${esc(one.dup.name || one.dup.email)} will be merged into ${esc(one.keep.name || one.keep.email)} (${esc(fmtPhone(one.phone))}).</p>` : ''}
     ${!one && pairs.every((q) => q.keep.id === pairs[0].keep.id)
       ? `<p>These accounts will be merged into ${esc(pairs[0].keep.name || pairs[0].keep.email)} (${esc(fmtPhone(pairs[0].phone))}):</p>
          <ul>${pairs.map((q) => `<li>${esc(q.dup.name || 'No name')}, ${esc(q.dup.email || 'no email')}, ${q.dup.orders} order${q.dup.orders === 1 ? '' : 's'}</li>`).join('')}</ul>`
       : ''}
     <p>Orders, addresses and tags move to the account that's kept, and the duplicate account is deleted.
     ${S.meta.flitsEnabled && pts ? `${fmtPts(pts)} Flits points will be added to the kept accounts.` : ''}</p>
-    ${emailChoiceHtml(pairs)}
+    ${one ? keepChoiceHtml(one) : ''}
+    <div id="emailBox">${emailChoiceHtml(pairs)}</div>
     <p>Shopify can't undo a merge. Each pair is checked again with Shopify just before it's merged.</p>
     ${S.meta.dryRun ? '<p><strong>Practice mode:</strong> nothing will actually change.</p>' : ''}
     <div class="dlg-actions">
       <button class="btn" type="button" data-close>Cancel</button>
       <button class="btn primary" type="button" id="goMerge">${one ? 'Merge accounts' : `Merge ${pairs.length} accounts`}</button>
     </div>`);
-  $('goMerge').addEventListener('click', () => runMerge(pairs.map((p) => p.key), false, readEmailChoice(pairs)));
+  if (one) wireKeepChoice(one);
+  $('goMerge').addEventListener('click', () => runMerge(pairs.map((p) => p.key), false, { ...readEmailChoice(pairs), ...(one ? readKeepChoice(one) : {}) }));
 }
 
 function reviewHighRisk(p) {
@@ -789,7 +823,8 @@ function reviewHighRisk(p) {
       ${S.meta.flitsEnabled ? `<tr><td>Flits points</td><td>${fmtPts(p.points || 0)} (will move)</td><td></td></tr>` : ''}
       <tr><td>In Shopify</td><td><a href="${adminUrl(d.id)}" target="_blank" rel="noopener">Open duplicate</a></td><td><a href="${adminUrl(k.id)}" target="_blank" rel="noopener">Open account kept</a></td></tr>
     </table></div>
-    ${emailChoiceHtml([p])}
+    ${keepChoiceHtml(p)}
+    <div id="emailBox">${emailChoiceHtml([p])}</div>
     <label class="confirm"><input type="checkbox" id="sure"> <span>I checked both accounts and they belong to the same person.</span></label>
     <div class="dlg-actions">
       <button class="btn" type="button" data-close>Cancel</button>
@@ -797,7 +832,8 @@ function reviewHighRisk(p) {
       <button class="btn danger" type="button" id="goHigh" disabled>Merge these accounts</button>
     </div>`);
   $('sure').addEventListener('change', (e) => { $('goHigh').disabled = !e.target.checked; });
-  $('goHigh').addEventListener('click', () => runMerge([p.key], true, readEmailChoice([p])));
+  wireKeepChoice(p);
+  $('goHigh').addEventListener('click', () => runMerge([p.key], true, { ...readEmailChoice([p]), ...readKeepChoice(p) }));
   $('notSame').addEventListener('click', () => dismiss(p, 'Not the same person (reviewed)'));
 }
 

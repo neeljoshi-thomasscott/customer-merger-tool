@@ -163,14 +163,20 @@ export function buildPlan(customers, dismissed = {}) {
 
 // ---------- Check each pair with Shopify (and Flits) ----------
 async function checkWithShopify(pair) {
-  const override = pair.keep.email ? { customerIdOfEmailToKeep: pair.keep.gid } : null;
-  const preview = await previewMerge(pair.dup.gid, pair.keep.gid, override);
+  // Shopify keeps the account whose email is kept, so the kept account's email is always chosen.
+  // If only the other account logs in with the phone, its phone number comes along.
+  const override = {
+    ...(pair.keep.email ? { customerIdOfEmailToKeep: pair.keep.gid } : {}),
+    ...(pair.dup.loginPhone && !pair.keep.loginPhone ? { customerIdOfPhoneNumberToKeep: pair.dup.gid } : {}),
+  };
+  const o = Object.keys(override).length ? override : null;
+  const preview = await previewMerge(pair.dup.gid, pair.keep.gid, o);
   const errors = preview.customerMergeErrors || [];
-  if (errors.length) return { ok: false, reason: `Shopify blocks this merge: ${errors.map((e) => e.message).join('; ')}`, override };
+  if (errors.length) return { ok: false, reason: `Shopify blocks this merge: ${errors.map((e) => e.message).join('; ')}`, override: o };
   if (preview.resultingCustomerId !== pair.keep.gid) {
-    return { ok: false, reason: 'Shopify would keep the duplicate instead (it has an email, the account to keep has none)', override };
+    return { ok: false, reason: 'Shopify would keep the other account instead (the account to keep has no email)', override: o };
   }
-  return { ok: true, override };
+  return { ok: true, override: o };
 }
 
 async function pointsToMove(dupId) {
@@ -205,7 +211,11 @@ export async function checkPairs(pairs, onProgress = () => {}) {
  * Re-checks with Shopify first, so a stale plan can never merge the wrong way.
  * Returns { ok, status, message, pointsMoved }.
  */
-export async function mergePair(pair, { actor = 'system', source = 'dashboard', useRealEmail = true } = {}) {
+export async function mergePair(pair, { actor = 'system', source = 'dashboard', useRealEmail = true, keepNewer = false } = {}) {
+  // The team chose to keep the newer account: merge the older one into it instead. Its Flits points
+  // then move to the newer account, and its login phone comes along (see checkWithShopify).
+  if (keepNewer) pair = { ...pair, dup: pair.keep, keep: pair.dup, flipped: true };
+  const deletedId = pair.dup.id;
   const history = (status, message, pointsMoved = 0) => {
     if (status === 'would-merge') return;
     recordHistory({
@@ -229,7 +239,7 @@ export async function mergePair(pair, { actor = 'system', source = 'dashboard', 
   const toMove = await pointsToMove(pair.dup.id);
 
   if (config.dryRun) {
-    return { ok: true, status: 'would-merge', message: `Practice mode: would merge${toMove ? ` and move ${toMove} points` : ''}`, pointsMoved: 0 };
+    return { deletedId, ok: true, status: 'would-merge', message: `Practice mode: would merge${toMove ? ` and move ${toMove} points` : ''}`, pointsMoved: 0 };
   }
 
   const result = await mergeCustomers(pair.dup.gid, pair.keep.gid, check.override);
@@ -237,7 +247,7 @@ export async function mergePair(pair, { actor = 'system', source = 'dashboard', 
     const message = 'Merged, but Shopify kept the duplicate ID. Points not moved; check both accounts in Flits.';
     logAttention({ name: 'dashboard' }, { phone: pair.phone, newId: pair.dup.id, keepId: pair.keep.id, attention: message });
     history('needs-attention', message);
-    return { ok: false, status: 'needs-attention', message };
+    return { deletedId, ok: false, status: 'needs-attention', message };
   }
 
   // A temporary email on the kept account is replaced by the duplicate's real email (unless turned off).
@@ -253,7 +263,7 @@ export async function mergePair(pair, { actor = 'system', source = 'dashboard', 
   if (!toMove || !config.flits.movePointsToOldCustomer) {
     await note(toMove ? `${toMove} Flits points were not moved (moving is turned off).` : 'No Flits points to move.');
     history('merged', `Merged${emailMsg}`);
-    return { ok: true, status: 'merged', message: `Merged${emailMsg}`, pointsMoved: 0 };
+    return { deletedId, ok: true, status: 'merged', message: `Merged${emailMsg}`, pointsMoved: 0 };
   }
 
   // The email Flits has for the kept account (Flits knows customers by Shopify ID).
@@ -263,7 +273,7 @@ export async function mergePair(pair, { actor = 'system', source = 'dashboard', 
     await note(`${toMove} Flits points NOT moved: this account has no email. Add them in Flits by hand.`);
     logAttention({ name: 'dashboard' }, { phone: pair.phone, newId: pair.dup.id, keepId: pair.keep.id, attention: message });
     history('needs-attention', message);
-    return { ok: true, status: 'needs-attention', message };
+    return { deletedId, ok: true, status: 'needs-attention', message };
   }
 
   try {
@@ -271,12 +281,12 @@ export async function mergePair(pair, { actor = 'system', source = 'dashboard', 
     addMovedPoints(pair.dup.id, toMove);
     await note(`${toMove} Flits points moved to ${target}.`);
     history('merged', `Merged, ${toMove} points moved${emailMsg}`, toMove);
-    return { ok: true, status: 'merged', message: `Merged, ${toMove} points moved to ${target}${emailMsg}`, pointsMoved: toMove };
+    return { deletedId, ok: true, status: 'merged', message: `Merged, ${toMove} points moved to ${target}${emailMsg}`, pointsMoved: toMove };
   } catch (err) {
     const message = `Merged, but moving ${toMove} points failed: ${err.message}. Add them in Flits by hand.`;
     await note(`moving ${toMove} Flits points FAILED. Add them in Flits by hand.`);
     logAttention({ name: 'dashboard' }, { phone: pair.phone, newId: pair.dup.id, keepId: pair.keep.id, attention: message });
     history('needs-attention', message);
-    return { ok: true, status: 'needs-attention', message };
+    return { deletedId, ok: true, status: 'needs-attention', message };
   }
 }

@@ -104,7 +104,7 @@ function scan(by) {
 
 // emailChoice: { useRealEmail } for all pairs, or { emailPick: { keptId: duplicateId | 'keep' } }
 // to choose which duplicate's real email replaces a kept account's temporary one.
-function merge(keys, by, emailChoice = {}) {
+function merge(keys, by, emailChoice = {}, keepPick = {}) {
   return startTask('merge', by, keys.length, async (t) => {
     t.phase = config.dryRun ? 'Practice merge' : 'Merging';
     for (const key of keys) {
@@ -117,7 +117,8 @@ function merge(keys, by, emailChoice = {}) {
         try {
           const pick = emailChoice.emailPick?.[pair.keep.id];
           const useRealEmail = pick === undefined ? emailChoice.useRealEmail !== false : String(pick) === String(pair.dup.id);
-          r = await mergePair(pair, { actor: by, source: 'dashboard', useRealEmail });
+          const keepNewer = keepPick[pair.key] === 'newer';
+          r = await mergePair(pair, { actor: by, source: 'dashboard', useRealEmail: keepNewer ? true : useRealEmail, keepNewer });
         } catch (err) {
           r = { ok: false, status: 'failed', message: err.message };
         }
@@ -127,7 +128,8 @@ function merge(keys, by, emailChoice = {}) {
           savePlan();
         } else if (r.status === 'merged' || r.status === 'needs-attention') {
           // The duplicate no longer exists: drop every pair that involves it.
-          plan.pairs = plan.pairs.filter((p) => p.dup.id !== pair.dup.id && p.keep.id !== pair.dup.id);
+          const gone = r.deletedId || pair.dup.id;
+          plan.pairs = plan.pairs.filter((p) => p.key !== pair.key && p.dup.id !== gone && p.keep.id !== gone);
           savePlan();
         } else if (r.status === 'blocked') {
           pair.risk = 'blocked';
@@ -309,7 +311,9 @@ async function handle(req, res) {
       if (highRisk.length && body.confirmHighRisk !== true) return send(res, 400, { error: 'Confirm that both accounts belong to the same person' });
 
       const emailPick = body.emailPick && typeof body.emailPick === 'object' ? body.emailPick : undefined;
-      return send(res, 202, merge(keys, user, { useRealEmail: body.useRealEmail !== false, emailPick }));
+      const keepPick = body.keepPick && typeof body.keepPick === 'object' ? body.keepPick : {};
+      if (Object.keys(keepPick).length && keys.length > 1) return send(res, 400, { error: 'Choose the account to keep one pair at a time' });
+      return send(res, 202, merge(keys, user, { useRealEmail: body.useRealEmail !== false, emailPick }, keepPick));
     }
 
     case 'POST /api/dismiss': {
