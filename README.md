@@ -201,6 +201,24 @@ npm run backfill                       # all low risk pairs
 npm run backfill -- --include-medium   # also medium risk pairs
 ```
 
+## Temporary emails
+
+Accounts created with only a mobile number get a made-up email such as
+`3725de03e137a62f604cca5d3af7178f@thomasscott.in` (32 letters and digits; set by `TEMP_EMAIL_PATTERN`). Staff
+emails like `name@thomasscott.in` don't match.
+
+When the account kept has such an email and the duplicate has a real one, the real email goes on the kept account:
+
+- **Automatic merges:** always, right after the merge.
+- **Dashboard merges:** the merge dialog asks which email to keep (the duplicate's real email is selected; with
+  several duplicates, each real email is an option, or keep the temporary one). For more than three kept accounts at
+  once it's a single tick box.
+
+The merge itself always keeps the **older** account (its customer ID, Flits points and phone login). Asking Shopify to
+keep the duplicate's email during the merge would make it keep the duplicate's account instead, so the email is
+changed with a separate update straight after the merge, and a line is added to the customer's note. Flits points
+are always sent to the email Flits has for the kept account.
+
 ## Comments in Shopify and Flits
 
 Every merge and points transfer leaves a comment starting with *Customer merger tool:*:

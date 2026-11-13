@@ -73,6 +73,10 @@ export const config = {
   dailyCheckTime: String(process.env.DAILY_CHECK_TIME ?? process.env.AUTO_MERGE_TIME ?? '11:00').trim(),
   dailyCheckLookbackHours: num(process.env.DAILY_CHECK_LOOKBACK_HOURS, 72),
 
+  // Placeholder emails given to accounts created with only a mobile number (regular expression).
+  // In a merge, a real email from the duplicate replaces such an email on the kept account.
+  tempEmailPattern: process.env.TEMP_EMAIL_PATTERN || String.raw`^[0-9a-f]{32}@thomasscott\.in$`,
+
   // Testing: when set (comma separated), the automatic merger only acts on orders with one of these
   // phone numbers and skips every other order. Leave empty for normal use.
   autoMergeOnlyPhones: String(process.env.AUTO_MERGE_ONLY_PHONES || '').split(',').map((p) => p.trim()).filter(Boolean),

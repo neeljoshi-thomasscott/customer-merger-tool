@@ -102,7 +102,9 @@ function scan(by) {
   });
 }
 
-function merge(keys, by) {
+// emailChoice: { useRealEmail } for all pairs, or { emailPick: { keptId: duplicateId | 'keep' } }
+// to choose which duplicate's real email replaces a kept account's temporary one.
+function merge(keys, by, emailChoice = {}) {
   return startTask('merge', by, keys.length, async (t) => {
     t.phase = config.dryRun ? 'Practice merge' : 'Merging';
     for (const key of keys) {
@@ -113,7 +115,9 @@ function merge(keys, by) {
         r = { ok: false, status: 'skipped', message: 'No longer in the list (merged or rescanned)' };
       } else {
         try {
-          r = await mergePair(pair, { actor: by, source: 'dashboard' });
+          const pick = emailChoice.emailPick?.[pair.keep.id];
+          const useRealEmail = pick === undefined ? emailChoice.useRealEmail !== false : String(pick) === String(pair.dup.id);
+          r = await mergePair(pair, { actor: by, source: 'dashboard', useRealEmail });
         } catch (err) {
           r = { ok: false, status: 'failed', message: err.message };
         }
@@ -244,6 +248,7 @@ async function handle(req, res) {
         adminBase: `https://admin.shopify.com/store/${shopHandle}`,
         dryRun: config.dryRun,
         flitsEnabled: config.flits.enabled,
+        tempEmailPattern: config.tempEmailPattern,
         autoMerge: autoStatus(),
         lookbackHours: config.lookbackHours,
         autoMergeOnlyPhones: config.autoMergeOnlyPhones,
@@ -298,7 +303,8 @@ async function handle(req, res) {
       if (highRisk.length && keys.length > 1) return send(res, 400, { error: 'High risk pairs must be merged one at a time' });
       if (highRisk.length && body.confirmHighRisk !== true) return send(res, 400, { error: 'Confirm that both accounts belong to the same person' });
 
-      return send(res, 202, merge(keys, user));
+      const emailPick = body.emailPick && typeof body.emailPick === 'object' ? body.emailPick : undefined;
+      return send(res, 202, merge(keys, user, { useRealEmail: body.useRealEmail !== false, emailPick }));
     }
 
     case 'POST /api/dismiss': {

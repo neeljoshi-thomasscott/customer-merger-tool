@@ -209,6 +209,8 @@ dialog::backdrop { background: rgba(10, 14, 25, .45); }
 .compare td.diff { background: var(--high-bg); }
 .compare td.diffsoft { background: var(--medium-bg); }
 .confirm { display: flex; gap: 10px; align-items: flex-start; margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.emailpick p { margin: 16px 0 4px; }
+.emailpick .confirm { margin-top: 6px; padding: 8px 12px; align-items: center; }
 .confirm input { width: 18px; height: 18px; margin-top: 2px; }
 .reasons { margin: 8px 0 0; padding-left: 18px; }
 
@@ -439,7 +441,7 @@ function nameHtml(acct, other) {
 
 function acctHtml(acct, other, role) {
   const bits = [
-    acct.email || 'No email',
+    acct.email ? `${acct.email}${isTemp(acct.email) ? ' (temporary email)' : ''}` : 'No email',
     `${acct.orders} order${acct.orders === 1 ? '' : 's'}, joined ${fmtDate(acct.createdAt)}${acct.city ? `, ${acct.city}` : ''}`,
   ];
   return `<div class="acct ${role}">
@@ -695,6 +697,52 @@ $('dlg').addEventListener('click', (e) => {
   if (e.target.closest('[data-close]')) closeDialog();
 });
 
+// ---------- Temporary emails ----------
+// Accounts created with only a mobile number get a made-up email (32 letters/digits @thomasscott.in).
+// When the kept account has one and the duplicate has a real email, the team chooses which email stays.
+const isTemp = (e) => Boolean(e) && new RegExp(S.meta.tempEmailPattern || '$^', 'i').test(String(e).trim());
+
+/** Kept accounts in `pairs` with a temporary email, and the real emails their duplicates offer. */
+function emailChoices(pairs) {
+  const byKeep = new Map();
+  for (const q of pairs) {
+    if (!isTemp(q.keep.email) || !q.dup.email || isTemp(q.dup.email)) continue;
+    if (!byKeep.has(q.keep.id)) byKeep.set(q.keep.id, { keep: q.keep, options: [] });
+    byKeep.get(q.keep.id).options.push(q.dup);
+  }
+  for (const g of byKeep.values()) g.options.sort((a, b) => b.orders - a.orders);
+  return [...byKeep.values()];
+}
+
+function emailChoiceHtml(pairs) {
+  const groups = emailChoices(pairs);
+  if (!groups.length) return '';
+  if (groups.length > 3) {
+    return `<div class="emailpick"><label class="confirm"><input type="checkbox" id="useReal" checked>
+      <span>${groups.length} kept accounts have a temporary email (…@thomasscott.in). Replace it with the duplicate's real email.</span></label></div>`;
+  }
+  return groups.map((g) => `<div class="emailpick">
+    <p><strong>Email for ${esc(g.keep.name || 'the kept account')}</strong> (its email is temporary):</p>
+    ${g.options.map((d, i) => `<label class="confirm"><input type="radio" name="em-${esc(g.keep.id)}" value="${esc(d.id)}" ${i === 0 ? 'checked' : ''}>
+      <span>${esc(d.email)} <span class="meta">(from ${esc(d.name || 'the duplicate')})</span></span></label>`).join('')}
+    <label class="confirm"><input type="radio" name="em-${esc(g.keep.id)}" value="keep">
+      <span>Keep ${esc(g.keep.email)} <span class="meta">(temporary)</span></span></label>
+  </div>`).join('');
+}
+
+/** The team's email choices from the open dialog, for the server. */
+function readEmailChoice(pairs) {
+  const groups = emailChoices(pairs);
+  if (!groups.length) return {};
+  if ($('useReal')) return { useRealEmail: $('useReal').checked };
+  const emailPick = {};
+  for (const g of groups) {
+    const picked = document.querySelector(`input[name="em-${CSS.escape(g.keep.id)}"]:checked`);
+    if (picked) emailPick[g.keep.id] = picked.value;
+  }
+  return { emailPick };
+}
+
 function confirmMerge(pairs) {
   const pts = pairs.reduce((s, p) => s + (p.points || 0), 0);
   const one = pairs.length === 1 ? pairs[0] : null;
@@ -707,13 +755,14 @@ function confirmMerge(pairs) {
       : ''}
     <p>Orders, addresses and tags move to the account that's kept, and the duplicate account is deleted.
     ${S.meta.flitsEnabled && pts ? `${fmtPts(pts)} Flits points will be added to the kept accounts.` : ''}</p>
+    ${emailChoiceHtml(pairs)}
     <p>Shopify can't undo a merge. Each pair is checked again with Shopify just before it's merged.</p>
     ${S.meta.dryRun ? '<p><strong>Practice mode:</strong> nothing will actually change.</p>' : ''}
     <div class="dlg-actions">
       <button class="btn" type="button" data-close>Cancel</button>
       <button class="btn primary" type="button" id="goMerge">${one ? 'Merge accounts' : `Merge ${pairs.length} accounts`}</button>
     </div>`);
-  $('goMerge').addEventListener('click', () => runMerge(pairs.map((p) => p.key), false));
+  $('goMerge').addEventListener('click', () => runMerge(pairs.map((p) => p.key), false, readEmailChoice(pairs)));
 }
 
 function reviewHighRisk(p) {
@@ -740,6 +789,7 @@ function reviewHighRisk(p) {
       ${S.meta.flitsEnabled ? `<tr><td>Flits points</td><td>${fmtPts(p.points || 0)} (will move)</td><td></td></tr>` : ''}
       <tr><td>In Shopify</td><td><a href="${adminUrl(d.id)}" target="_blank" rel="noopener">Open duplicate</a></td><td><a href="${adminUrl(k.id)}" target="_blank" rel="noopener">Open account kept</a></td></tr>
     </table></div>
+    ${emailChoiceHtml([p])}
     <label class="confirm"><input type="checkbox" id="sure"> <span>I checked both accounts and they belong to the same person.</span></label>
     <div class="dlg-actions">
       <button class="btn" type="button" data-close>Cancel</button>
@@ -747,7 +797,7 @@ function reviewHighRisk(p) {
       <button class="btn danger" type="button" id="goHigh" disabled>Merge these accounts</button>
     </div>`);
   $('sure').addEventListener('change', (e) => { $('goHigh').disabled = !e.target.checked; });
-  $('goHigh').addEventListener('click', () => runMerge([p.key], true));
+  $('goHigh').addEventListener('click', () => runMerge([p.key], true, readEmailChoice([p])));
   $('notSame').addEventListener('click', () => dismiss(p, 'Not the same person (reviewed)'));
 }
 
@@ -777,11 +827,11 @@ async function startScan() {
 }
 $('scanBtn').addEventListener('click', startScan);
 
-async function runMerge(keys, confirmHighRisk) {
+async function runMerge(keys, confirmHighRisk, emailChoice = {}) {
   closeDialog();
   showOverlay({ type: 'merge', status: 'running', phase: 'Starting', done: 0, total: keys.length });
   try {
-    const t = await api('/api/merge', { keys, confirmHighRisk });
+    const t = await api('/api/merge', { keys, confirmHighRisk, ...emailChoice });
     for (const k of keys) S.selected.delete(k);
     renderBulk();
     renderTask(t);

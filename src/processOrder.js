@@ -4,6 +4,7 @@ import {
   searchCustomersByPhone, previewMerge, mergeCustomers, getAddresses, addAddress, numericId,
 } from './shopify.js';
 import { noteMerge } from './annotate.js';
+import { replaceTempEmail } from './email.js';
 
 const HOUR = 3600 * 1000;
 const skipped = (details) => ({ status: 'skipped', details });
@@ -97,6 +98,9 @@ async function doMerge(order, current, keep, override, base) {
     };
   }
 
+  // A temporary email on the kept account is replaced by the duplicate's real email.
+  const swapped = await replaceTempEmail(keep.id, current.defaultEmailAddress?.emailAddress);
+
   await noteMerge({
     orderName: order.name,
     dupId: base.newId, dupLabel: current.defaultEmailAddress?.emailAddress || '',
@@ -121,9 +125,9 @@ async function doMerge(order, current, keep, override, base) {
   return {
     ...base,
     dupInfo: info(current),
-    keepInfo: info(keep),
+    keepInfo: swapped?.email ? { ...info(keep), email: swapped.email } : info(keep),
     status: 'merged',
-    details: `${result.jobDone ? 'merged' : 'merge job still running'}; points will be moved after delivery`,
+    details: `${result.jobDone ? 'merged' : 'merge job still running'}${swapped?.email ? `; email changed to ${swapped.email}` : ''}; points will be moved after delivery`,
     pending,
   };
 }

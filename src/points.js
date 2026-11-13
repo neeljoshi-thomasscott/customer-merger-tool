@@ -95,7 +95,8 @@ export async function processPendingPoints(state) {
         continue;
       }
 
-      const email = p.oldEmail || (await flits.getCustomer(p.oldId))?.email || null;
+      // The email Flits has for the kept account (it may have changed from a temporary one since the merge).
+      const email = (await flits.getCustomer(p.oldId))?.email || p.oldEmail || null;
       if (!email) {
         await done('needs-attention', toMove, 'old customer has no email',
           `${toMove} points on duplicate ${p.duplicateId} could not be moved: old customer ${p.oldId} has no email. Add them manually.`);

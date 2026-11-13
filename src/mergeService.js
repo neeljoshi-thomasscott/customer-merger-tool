@@ -7,6 +7,7 @@ import { normalizePhone } from './phone.js';
 import * as flits from './flits.js';
 import { recordHistory, logAttention, getMovedPoints, addMovedPoints } from './store.js';
 import { noteMerge } from './annotate.js';
+import { replaceTempEmail } from './email.js';
 
 const cc = config.countryCode;
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -204,7 +205,7 @@ export async function checkPairs(pairs, onProgress = () => {}) {
  * Re-checks with Shopify first, so a stale plan can never merge the wrong way.
  * Returns { ok, status, message, pointsMoved }.
  */
-export async function mergePair(pair, { actor = 'system', source = 'dashboard' } = {}) {
+export async function mergePair(pair, { actor = 'system', source = 'dashboard', useRealEmail = true } = {}) {
   const history = (status, message, pointsMoved = 0) => {
     if (status === 'would-merge') return;
     recordHistory({
@@ -238,6 +239,10 @@ export async function mergePair(pair, { actor = 'system', source = 'dashboard' }
     return { ok: false, status: 'needs-attention', message };
   }
 
+  // A temporary email on the kept account is replaced by the duplicate's real email (unless turned off).
+  const swapped = useRealEmail ? await replaceTempEmail(pair.keep.gid, pair.dup.email) : null;
+  const emailMsg = swapped?.email ? `; email changed to ${swapped.email}` : swapped?.error ? `; email NOT changed: ${swapped.error}` : '';
+
   // Comment on the kept customer in Shopify (never stops the merge if it fails).
   const note = (pointsText) => noteMerge({
     dupId: pair.dup.id, dupLabel: [pair.dup.name, pair.dup.email].filter(Boolean).join(', '),
@@ -246,11 +251,12 @@ export async function mergePair(pair, { actor = 'system', source = 'dashboard' }
 
   if (!toMove || !config.flits.movePointsToOldCustomer) {
     await note(toMove ? `${toMove} Flits points were not moved (moving is turned off).` : 'No Flits points to move.');
-    history('merged', 'Merged');
-    return { ok: true, status: 'merged', message: 'Merged', pointsMoved: 0 };
+    history('merged', `Merged${emailMsg}`);
+    return { ok: true, status: 'merged', message: `Merged${emailMsg}`, pointsMoved: 0 };
   }
 
-  const target = pair.keep.email || (await flits.getCustomer(pair.keep.id))?.email;
+  // The email Flits has for the kept account (Flits knows customers by Shopify ID).
+  const target = (await flits.getCustomer(pair.keep.id))?.email || pair.keep.email;
   if (!target) {
     const message = `Merged. ${toMove} points not moved: the kept account has no email. Add them in Flits by hand.`;
     await note(`${toMove} Flits points NOT moved: this account has no email. Add them in Flits by hand.`);
@@ -263,8 +269,8 @@ export async function mergePair(pair, { actor = 'system', source = 'dashboard' }
     await flits.addLoyaltyPoints(target, toMove, `Customer merger tool: points moved from duplicate account ${pair.dup.id} (customer merge)`);
     addMovedPoints(pair.dup.id, toMove);
     await note(`${toMove} Flits points moved to ${target}.`);
-    history('merged', `Merged, ${toMove} points moved`, toMove);
-    return { ok: true, status: 'merged', message: `Merged, ${toMove} points moved to ${target}`, pointsMoved: toMove };
+    history('merged', `Merged, ${toMove} points moved${emailMsg}`, toMove);
+    return { ok: true, status: 'merged', message: `Merged, ${toMove} points moved to ${target}${emailMsg}`, pointsMoved: toMove };
   } catch (err) {
     const message = `Merged, but moving ${toMove} points failed: ${err.message}. Add them in Flits by hand.`;
     await note(`moving ${toMove} Flits points FAILED. Add them in Flits by hand.`);
