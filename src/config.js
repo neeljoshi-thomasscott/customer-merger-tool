@@ -60,15 +60,16 @@ export const config = {
     users: process.env.DASHBOARD_USERS || '',
   },
 
-  // Flits points (stage 2) are checked this often.
+  // Flits points (stage 2): merged orders waiting for delivery are checked this often.
+  // Nothing is fetched when no order is waiting.
   pollIntervalMinutes: num(process.env.POLL_INTERVAL_MINUTES, 5),
 
-  // New orders are checked for duplicates this often, so a customer is merged about
-  // MIN_ORDER_AGE_MINUTES after ordering (plus up to this many minutes).
-  mergeCheckMinutes: num(process.env.MERGE_CHECK_MINUTES, 1),
+  // Public address of this tool, for Shopify's "order created" webhook. On Railway the generated
+  // domain is used automatically.
+  publicUrl: (process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')).replace(/\/+$/, ''),
 
-  // Daily safety check (India time, HH:MM): once a day the merger looks back further and re-checks
-  // orders where no duplicate was found the first time. Empty = no daily check.
+  // Daily safety check (India time, HH:MM): once a day the merger scans recent orders, in case a
+  // webhook was missed, and re-checks orders where no duplicate was found the first time. Empty = off.
   dailyCheckTime: String(process.env.DAILY_CHECK_TIME ?? process.env.AUTO_MERGE_TIME ?? '11:00').trim(),
   dailyCheckLookbackHours: num(process.env.DAILY_CHECK_LOOKBACK_HOURS, 72),
 

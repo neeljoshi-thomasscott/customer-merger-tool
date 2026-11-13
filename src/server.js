@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { fetchAllCustomers, buildPlan, checkPairs, mergePair } from './mergeService.js';
 import { readHistory, loadJson, saveJson, getAutoMerge, setAutoMerge, loadState } from './store.js';
-import { runStatus } from './status.js';
+import { runStatus, hooks } from './status.js';
+import { WEBHOOK_PATH, validSignature } from './webhooks.js';
 import { dailyTime, dailyTimeLabel, nextDailyCheckAt, lastDailyCheckAt } from './schedule.js';
 
 // Automatic merges counted from the merge history, by Indian date.
@@ -31,14 +32,9 @@ function autoStatus() {
       sinceOn: auto.at ? merges.filter((h) => Date.parse(h.at) >= Date.parse(auto.at)).length : 0,
       lastAt: merges[0]?.at || null,
     },
-    run: {
-      ...runStatus,
-      // Milliseconds until the next check, so the page's timer doesn't depend on the viewer's clock.
-      nextInMs: runStatus.nextRunAt ? Math.max(0, Date.parse(runStatus.nextRunAt) - Date.now()) : null,
-    },
+    run: runStatus,
     minOrderAgeMinutes: config.minOrderAgeMinutes,
     pollIntervalMinutes: config.pollIntervalMinutes,
-    mergeCheckMinutes: config.mergeCheckMinutes,
     daily: dailyTime ? (() => {
       const next = nextDailyCheckAt();
       return {
@@ -151,6 +147,35 @@ function send(res, status, body, type = 'application/json') {
   res.end(type === 'application/json' ? JSON.stringify(body) : body);
 }
 
+function readRaw(req) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > 1e6) { reject(new Error('Request too large')); req.destroy(); }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+// Shopify's "order created" webhook: no dashboard login, but it must carry Shopify's signature.
+async function orderWebhook(req, res) {
+  const raw = await readRaw(req);
+  if (!validSignature(raw, req.headers['x-shopify-hmac-sha256'])) {
+    console.warn(`webhook: rejected a request without a valid Shopify signature from ${clientIp(req)}`);
+    return send(res, 401, { error: 'Invalid signature' });
+  }
+  send(res, 200, { ok: true }); // answer at once; Shopify retries if it waits more than 5 seconds
+  let order;
+  try { order = JSON.parse(raw.toString('utf8')); } catch { return console.warn('webhook: body is not JSON'); }
+  if (!order.admin_graphql_api_id) return;
+  if (!hooks.onOrderCreated) return console.warn(`webhook: ${order.name} received but the merger isn't running here`);
+  hooks.onOrderCreated({ id: order.admin_graphql_api_id, name: order.name || `order ${order.id}`, createdAt: order.created_at });
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0;
@@ -181,6 +206,7 @@ function clientIp(req) {
 // ---------- Routes ----------
 async function handle(req, res) {
   if (req.url === '/health') return send(res, 200, { ok: true });
+  if (req.method === 'POST' && req.url === WEBHOOK_PATH) return orderWebhook(req, res);
 
   const ip = clientIp(req);
   const f = failures.get(ip);
@@ -310,5 +336,6 @@ http.createServer((req, res) => {
     if (!res.headersSent) send(res, 500, { error: err.message });
   });
 }).listen(config.dashboard.port, config.dashboard.host, () => {
+  hooks.serverReady = true;
   console.log(`Dashboard: http://${config.dashboard.host}:${config.dashboard.port}  (${config.dryRun ? 'practice mode, DRY_RUN=true' : 'LIVE'})`);
 });

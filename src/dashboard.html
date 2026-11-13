@@ -562,7 +562,8 @@ function renderAuto() {
       <div class="stat"><b>${m.today ?? 0}</b><span>merged today</span></div>
       <div class="stat"><b>${m.week ?? 0}</b><span>last 7 days</span></div>
       ${a.enabled ? `<div class="stat"><b>${m.sinceOn ?? 0}</b><span>since turned on</span></div>` : ''}
-      <div class="stat timer"><b id="autoTimer">–</b><span id="autoTimerLabel">next check</span></div>
+      <b id="autoWaiting" hidden></b>
+      <div class="stat timer"><b id="autoTimer">–</b><span id="autoTimerLabel">safety check</span></div>
       <button class="btn quiet" type="button" id="autoHistory">See merges</button>
     </div>
     <div class="meta" id="autoLast"></div>`;
@@ -570,7 +571,7 @@ function renderAuto() {
     <div class="auto-main">
       <div>Automatic merge after new orders: <span class="state ${a.enabled ? 'on' : 'off'}">${a.enabled ? 'ON' : 'OFF'}</span></div>
       <div class="meta">${a.enabled
-        ? `Orders placed since ${esc(fmtTime(a.at))} are merged into the older account with the same phone <strong>about ${a.minOrderAgeMinutes} minutes after the order</strong>${a.daily ? `, and a daily safety check at <strong>${esc(a.daily.timeLabel)}</strong> re-checks the last ${Math.round(a.daily.lookbackHours / 24)} days for anything missed` : ''}. Older duplicates: scan the store and review them here.`
+        ? `Orders placed since ${esc(fmtTime(a.at))} are merged into the older account with the same phone. As soon as Shopify reports a new order, the tool checks it <strong>${a.minOrderAgeMinutes} minutes later</strong>${a.daily ? `; a daily safety check at <strong>${esc(a.daily.timeLabel)}</strong> catches anything missed in the last ${Math.round(a.daily.lookbackHours / 24)} days` : ''}. Older duplicates: scan the store and review them here.`
         : 'New orders are not merged automatically. Duplicates show up here after the next scan.'} ${changed}</div>
       ${S.meta.autoMergeOnlyPhones?.length ? `<div class="meta"><strong>Test mode:</strong> only orders with phone ${esc(S.meta.autoMergeOnlyPhones.join(', '))} are merged automatically; all other orders are skipped.</div>` : ''}
     </div>
@@ -582,7 +583,8 @@ function renderAuto() {
   startAutoTimer();
 }
 
-// Counts down to the next check, then reloads the status (and the Merged list) once it has run.
+// Shows the webhook status and counts down to the daily safety check. The status reloads every
+// 30 seconds (and the Merged list with it), so new merges show up without reloading the page.
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const fmtLeft = (s) => {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
@@ -590,54 +592,53 @@ const fmtLeft = (s) => {
 };
 
 function startAutoTimer() {
-  clearTimeout(S.autoTimer);
   clearInterval(S.autoTimer);
+  clearTimeout(S.autoPoll);
   const a = S.meta.autoMerge;
   const r = a.run || {};
+  const wh = r.webhook || {};
   const daily = a.daily;
   const timerBox = document.querySelector('.stat.timer');
-  const mergerHere = r.lastRunAt || r.running; // false when the dashboard runs without the merger
-  if (!mergerHere || !a.enabled) { timerBox.hidden = true; }
+  const mergerHere = Boolean(r.startedAt); // false when the dashboard runs without the merger
+  if (!mergerHere || !a.enabled || !daily) timerBox.hidden = true;
 
-  const last = r.last;
-  const ld = r.lastDailyCheck;
   const lines = [];
-  if (a.enabled && r.lastRunAt) {
-    lines.push(`Checked for new orders ${fmtTime(r.lastRunAt)}${last && (last.checked || last.merged || last.errors)
-      ? `: ${plural(last.checked, 'new order')}, ${last.merged} merged${last.errors ? `, ${plural(last.errors, 'error')}` : ''}` : ''}.`
-      + ` New orders are checked every ${plural(a.mergeCheckMinutes, 'minute')} once they're ${a.minOrderAgeMinutes} minutes old.`);
-  }
-  if (a.enabled && daily) {
-    lines.push(`Daily safety check: next ${fmtTime(daily.nextAt)}${ld
-      ? `; last ${fmtTime(ld.at)}: ${plural(ld.checked, 'order')} re-checked, ${ld.merged} merged${ld.errors ? `, ${plural(ld.errors, 'error')}` : ''}`
-      : daily.lastAt ? `; last ${fmtTime(daily.lastAt)}` : ''}.`);
-  }
-  lines.push(`Flits points are checked every ${a.pollIntervalMinutes} minutes, about an hour after delivery.`);
-  $('autoLast').textContent = lines.join(' ');
-  if (timerBox.hidden) return;
-
-  const target = r.nextInMs == null ? null : Date.now() + r.nextInMs;
-  const tick = () => {
-    const left = target == null ? 0 : Math.max(0, Math.round((target - Date.now()) / 1000));
-    if (r.running || left === 0) {
-      $('autoTimer').textContent = '…';
-      $('autoTimerLabel').textContent = 'checking now';
-      clearInterval(S.autoTimer);
-      S.autoTimer = setTimeout(refreshAuto, 5000);
-      return;
+  if (a.enabled && mergerHere) {
+    lines.push(wh.ok
+      ? `Shopify tells the tool about every new order${wh.lastAt ? `; last one ${wh.lastOrder} at ${fmtTime(wh.lastAt)}` : ''}.`
+      : `Not connected to Shopify's new-order notifications: ${wh.error || 'starting up'}. New orders are only found by the daily safety check.`);
+    const waiting = Object.entries(r.waiting || {});
+    if (waiting.length) {
+      lines.push(`Waiting: ${waiting.map(([n, at]) => `${n} (${new Date(at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })})`).join(', ')}.`);
     }
-    $('autoTimer').textContent = fmtLeft(left);
-    $('autoTimerLabel').textContent = 'next check, then this refreshes';
+    if (r.last) {
+      const what = { merged: 'merged', skipped: `no action, ${r.last.details}`, error: `error: ${r.last.details}` }[r.last.status] || r.last.status;
+      lines.push(`Last order checked: ${r.last.order}, ${fmtTime(r.last.at)} (${what}).`);
+    }
+    const ld = r.lastDailyCheck;
+    if (ld) lines.push(`Last safety check ${fmtTime(ld.at)}: ${plural(ld.checked, 'order')} checked, ${ld.merged} merged${ld.errors ? `, ${plural(ld.errors, 'error')}` : ''}.`);
+  }
+  lines.push(`Flits points are moved about an hour after delivery.`);
+  $('autoLast').innerHTML = lines.map((l) => esc(l).replace(/^Not connected/, '<strong>Not connected</strong>')).join(' ');
+  $('autoWaiting').textContent = Object.keys(r.waiting || {}).length;
+
+  S.autoPoll = setTimeout(refreshAuto, 30000);
+  if (timerBox.hidden) return;
+  const target = Date.now() + daily.nextInMs;
+  const tick = () => {
+    const left = Math.max(0, Math.round((target - Date.now()) / 1000));
+    $('autoTimer').textContent = left ? fmtLeft(left) : '…';
+    $('autoTimerLabel').textContent = left ? `until the ${daily.timeLabel} safety check` : 'safety check running';
   };
   tick();
-  if (target != null && !r.running) S.autoTimer = setInterval(tick, 1000);
+  S.autoTimer = setInterval(tick, 1000);
 }
 
 async function refreshAuto() {
   try {
     S.meta.autoMerge = await api('/api/auto-status');
   } catch {
-    S.autoTimer = setTimeout(refreshAuto, 10000);
+    S.autoPoll = setTimeout(refreshAuto, 30000);
     return;
   }
   renderAuto();
@@ -648,7 +649,7 @@ function confirmAuto() {
   const on = !S.meta.autoMerge.enabled;
   openDialog(on ? `
     <h2>Turn on automatic merging?</h2>
-    <p>About ${S.meta.autoMerge.minOrderAgeMinutes} minutes after each new order, the tool will merge a new customer into an older customer with the <strong>same phone number</strong>.
+    <p>${S.meta.autoMerge.minOrderAgeMinutes} minutes after each new order is placed, the tool will merge a new customer into an older customer with the <strong>same phone number</strong>.
     It doesn't compare names, so a family member or gift order using someone else's phone will also be merged.</p>
     <p>Only orders placed <strong>from now on</strong> are merged automatically${S.meta.autoMerge.daily ? `, with a safety check every day at <strong>${esc(S.meta.autoMerge.daily.timeLabel)}</strong> for anything missed` : ''}. Earlier orders, including ones placed while it was off, are never merged automatically: scan the store to review those duplicates here.</p>
     ${S.meta.autoMergeOnlyPhones?.length ? `<p><strong>Test mode:</strong> only orders with phone ${esc(S.meta.autoMergeOnlyPhones.join(', '))} will be merged. Every other order is skipped.</p>` : ''}

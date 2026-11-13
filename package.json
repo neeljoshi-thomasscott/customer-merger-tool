@@ -9,7 +9,7 @@
   "scripts": {
     "dry": "node --env-file=.env src/run.js --once --dry-run",
     "once": "node --env-file=.env src/run.js --once",
-    "start": "node --env-file=.env src/run.js",
+    "start": "node --env-file=.env src/main.js",
     "backfill:dry": "node --env-file=.env src/backfill.js --dry-run",
     "backfill": "node --env-file=.env src/backfill.js",
     "dashboard": "node --env-file=.env src/server.js",

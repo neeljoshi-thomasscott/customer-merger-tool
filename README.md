@@ -1,14 +1,14 @@
 # Shopify duplicate customer merge (by phone)
 
-Every few minutes this tool checks recent orders. If an order's customer was just created and an
+When an order is created, Shopify notifies this tool (webhook). If the order's customer was just created and an
 **older** customer already has the same phone number, it merges the new customer into the old one.
 The order moves to the old customer, so your "points on delivery" Flow credits the right account.
 
 ## How it works: two stages
 
-**Stage 1: merge, about 10 minutes after the order** (new orders are checked every minute)
+**Stage 1: merge, 10 minutes after the order**
 
-1. Skips orders newer than 10 minutes, so other apps finish with the new customer first.
+1. Waits until the order is 10 minutes old, so other apps finish with the new customer first.
 2. Skips the order if its customer was not created around the time of the order.
 3. Reads every phone on the order and normalizes it to `+91XXXXXXXXXX`.
 4. Looks for an older customer whose phone matches exactly.
@@ -33,18 +33,24 @@ Cancelled orders are closed without moving points. Orders not delivered within 3
 
 Nothing changes while `DRY_RUN=true`.
 
-**When it runs.** New orders are checked every minute (`MERGE_CHECK_MINUTES`), and an order is handled once it's
-10 minutes old (`MIN_ORDER_AGE_MINUTES`), so a customer who logs in with their mobile number soon after ordering
-already sees the order in their real account. After a restart the merger looks back 48 hours (`LOOKBACK_HOURS`) to
-catch up on orders placed while it was down.
+**When it runs.** The tool doesn't scan the store on a timer. On start it subscribes to Shopify's *order created*
+webhook at `<PUBLIC_URL>/webhooks/orders-create` (on Railway the generated domain is used automatically). Each
+webhook must carry Shopify's signature (made with the app's client secret); anything else is rejected. The order is
+checked 10 minutes after it was placed (`MIN_ORDER_AGE_MINUTES`), so a customer who logs in with their mobile number
+soon after ordering already sees the order in their real account.
 
-**Daily safety check at 11:00 am India time** (`DAILY_CHECK_TIME`, `HH:MM`; empty turns it off). Once a day the
-merger looks back 72 hours (`DAILY_CHECK_LOOKBACK_HOURS`), merges any order that was missed, and re-checks orders
-where no duplicate was found the first time (no phone on the order yet, or no older customer with that phone yet).
-If the service was down at 11:00, it runs as soon as it's back that day, and never twice a day.
+Two safety nets cover a webhook that never arrives:
 
-Stage 2 (Flits points) runs every `POLL_INTERVAL_MINUTES`. The dashboard shows a countdown to the next check and the
-time of the next daily safety check.
+- **On start** (for example after a redeploy), orders from the last 48 hours (`LOOKBACK_HOURS`) that weren't
+  handled yet are checked once.
+- **Daily safety check at 11:00 am India time** (`DAILY_CHECK_TIME`, `HH:MM`; empty turns it off). Once a day the
+  merger scans the last 72 hours (`DAILY_CHECK_LOOKBACK_HOURS`), merges any order that was missed, and re-checks
+  orders where no duplicate was found the first time (no phone on the order yet, or no older customer with that
+  phone yet). If the service was down at 11:00, it runs as soon as it's back that day, and never twice a day.
+
+Stage 2 (Flits points) checks the merged orders waiting for delivery every `POLL_INTERVAL_MINUTES`; when no order is
+waiting it makes no calls. The dashboard shows whether the webhook is connected, the orders waiting their 10
+minutes, and a countdown to the daily safety check.
 
 **Stage 1 is off by default.** Turn it on or off with the *Automatic merge after new orders* switch at the top
 of the dashboard. The setting is saved on the Volume (`data/settings.json`), so it survives redeploys, and takes
@@ -134,19 +140,16 @@ node --env-file=.env src/run.js --once --dry-run --lookback-hours=720
 
 ### 4. Go live
 
-Set `DRY_RUN=false` in `.env`, then run it continuously:
+Set `DRY_RUN=false` in `.env`, and set `PUBLIC_URL` to the HTTPS address where Shopify can reach the tool
+(for example behind Nginx or Caddy). Then keep it running:
 
 ```bash
-npm start                 # loops every POLL_INTERVAL_MINUTES
+npm start                 # dashboard + webhook + automatic merger
 # or keep it running with pm2:
 pm2 start "npm start" --name customer-merge
 ```
 
-Or run it from cron instead of looping:
-
-```
-*/5 * * * * cd /path/to/customer-merge-tool && node --env-file=.env src/run.js --once >> data/run.log 2>&1
-```
+`npm run once` runs a single catch-up scan of the last 48 hours and exits, without the webhook.
 
 ## Dashboard for past duplicates (`npm run dashboard`)
 

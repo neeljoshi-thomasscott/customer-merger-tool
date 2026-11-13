@@ -1,4 +1,4 @@
-// The daily safety check. New orders are merged within minutes (every MERGE_CHECK_MINUTES); once a day
+// The daily safety check. New orders are merged via the order-created webhook; once a day
 // at DAILY_CHECK_TIME (India time, HH:MM, default 11:00) the merger also looks back further and
 // re-checks orders where no duplicate was found the first time, in case one was missed.
 // The time of the last daily check is kept on the Volume, so a restart around that time neither
