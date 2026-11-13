@@ -131,6 +131,7 @@ function merge(keys, by, emailChoice = {}) {
           savePlan();
         }
       }
+      console.log(`dashboard merge by ${by}: duplicate ${pair?.dup.id || key} -> kept ${pair?.keep.id || '?'}: ${r.status}, ${r.message}`);
       t.results.push({ key, dup: pair?.dup.name || '', keep: pair?.keep.name || '', ...r });
       t.done++;
     }
