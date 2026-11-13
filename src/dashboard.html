@@ -570,7 +570,7 @@ function renderAuto() {
     <div class="auto-main">
       <div>Automatic merge after new orders: <span class="state ${a.enabled ? 'on' : 'off'}">${a.enabled ? 'ON' : 'OFF'}</span></div>
       <div class="meta">${a.enabled
-        ? `Orders placed since ${esc(fmtTime(a.at))} are merged into the older account with the same phone, ${a.schedule ? `once a day at <strong>${esc(a.schedule.timeLabel)}</strong>` : 'about 10 minutes after the order'}. Older duplicates: scan the store and review them here.`
+        ? `Orders placed since ${esc(fmtTime(a.at))} are merged into the older account with the same phone <strong>about ${a.minOrderAgeMinutes} minutes after the order</strong>${a.daily ? `, and a daily safety check at <strong>${esc(a.daily.timeLabel)}</strong> re-checks the last ${Math.round(a.daily.lookbackHours / 24)} days for anything missed` : ''}. Older duplicates: scan the store and review them here.`
         : 'New orders are not merged automatically. Duplicates show up here after the next scan.'} ${changed}</div>
       ${S.meta.autoMergeOnlyPhones?.length ? `<div class="meta"><strong>Test mode:</strong> only orders with phone ${esc(S.meta.autoMergeOnlyPhones.join(', '))} are merged automatically; all other orders are skipped.</div>` : ''}
     </div>
@@ -582,8 +582,7 @@ function renderAuto() {
   startAutoTimer();
 }
 
-// Counts down to the next merge run (daily schedule) or the next check, then reloads the status
-// (and the Merged list) once it has run.
+// Counts down to the next check, then reloads the status (and the Merged list) once it has run.
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const fmtLeft = (s) => {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
@@ -595,42 +594,43 @@ function startAutoTimer() {
   clearInterval(S.autoTimer);
   const a = S.meta.autoMerge;
   const r = a.run || {};
-  const sch = a.schedule;
+  const daily = a.daily;
   const timerBox = document.querySelector('.stat.timer');
   const mergerHere = r.lastRunAt || r.running; // false when the dashboard runs without the merger
-  if (!mergerHere || (sch && !a.enabled)) { timerBox.hidden = true; }
+  if (!mergerHere || !a.enabled) { timerBox.hidden = true; }
 
-  if (sch) {
-    const lm = r.lastMerge;
-    $('autoLast').textContent = (lm
-      ? `Last merge run ${fmtTime(lm.at)}: ${plural(lm.checked, 'new order')} checked, ${lm.merged} merged${lm.errors ? `, ${plural(lm.errors, 'error')}` : ''}.`
-      : sch.lastMergeRunAt ? `Last merge run ${fmtTime(sch.lastMergeRunAt)}.` : '')
-      + ` Flits points are checked every ${a.pollIntervalMinutes} minutes, about an hour after delivery.`;
-  } else {
-    const last = r.last;
-    $('autoLast').textContent = r.lastRunAt
-      ? `Last check ${fmtTime(r.lastRunAt)}: ${last ? `${plural(last.checked, 'new order')} checked, ${last.merged} merged${last.errors ? `, ${plural(last.errors, 'error')}` : ''}` : ''}.`
-        + ` An order is checked once it's ${a.minOrderAgeMinutes} minutes old, so a merge shows up within about ${a.minOrderAgeMinutes + a.pollIntervalMinutes} minutes of the order.`
-      : '';
+  const last = r.last;
+  const ld = r.lastDailyCheck;
+  const lines = [];
+  if (a.enabled && r.lastRunAt) {
+    lines.push(`Checked for new orders ${fmtTime(r.lastRunAt)}${last && (last.checked || last.merged || last.errors)
+      ? `: ${plural(last.checked, 'new order')}, ${last.merged} merged${last.errors ? `, ${plural(last.errors, 'error')}` : ''}` : ''}.`
+      + ` New orders are checked every ${plural(a.mergeCheckMinutes, 'minute')} once they're ${a.minOrderAgeMinutes} minutes old.`);
   }
+  if (a.enabled && daily) {
+    lines.push(`Daily safety check: next ${fmtTime(daily.nextAt)}${ld
+      ? `; last ${fmtTime(ld.at)}: ${plural(ld.checked, 'order')} re-checked, ${ld.merged} merged${ld.errors ? `, ${plural(ld.errors, 'error')}` : ''}`
+      : daily.lastAt ? `; last ${fmtTime(daily.lastAt)}` : ''}.`);
+  }
+  lines.push(`Flits points are checked every ${a.pollIntervalMinutes} minutes, about an hour after delivery.`);
+  $('autoLast').textContent = lines.join(' ');
   if (timerBox.hidden) return;
 
-  const ms = sch ? sch.nextMergeInMs : r.nextInMs;
-  const target = ms == null ? null : Date.now() + ms;
+  const target = r.nextInMs == null ? null : Date.now() + r.nextInMs;
   const tick = () => {
     const left = target == null ? 0 : Math.max(0, Math.round((target - Date.now()) / 1000));
-    if ((!sch && r.running) || left === 0) {
+    if (r.running || left === 0) {
       $('autoTimer').textContent = '…';
-      $('autoTimerLabel').textContent = sch ? 'merging now' : 'checking now';
+      $('autoTimerLabel').textContent = 'checking now';
       clearInterval(S.autoTimer);
       S.autoTimer = setTimeout(refreshAuto, 5000);
       return;
     }
     $('autoTimer').textContent = fmtLeft(left);
-    $('autoTimerLabel').textContent = sch ? `until the ${sch.timeLabel} merge` : 'next check, then this refreshes';
+    $('autoTimerLabel').textContent = 'next check, then this refreshes';
   };
   tick();
-  if (target != null && !(!sch && r.running)) S.autoTimer = setInterval(tick, 1000);
+  if (target != null && !r.running) S.autoTimer = setInterval(tick, 1000);
 }
 
 async function refreshAuto() {
@@ -648,9 +648,9 @@ function confirmAuto() {
   const on = !S.meta.autoMerge.enabled;
   openDialog(on ? `
     <h2>Turn on automatic merging?</h2>
-    <p>Every few minutes the tool will merge a new customer into an older customer with the <strong>same phone number</strong>.
+    <p>About ${S.meta.autoMerge.minOrderAgeMinutes} minutes after each new order, the tool will merge a new customer into an older customer with the <strong>same phone number</strong>.
     It doesn't compare names, so a family member or gift order using someone else's phone will also be merged.</p>
-    <p>Only orders placed <strong>from now on</strong> are merged automatically${S.meta.autoMerge.schedule ? `, in one run every day at <strong>${esc(S.meta.autoMerge.schedule.timeLabel)}</strong>` : ''}. Earlier orders, including ones placed while it was off, are never merged automatically: scan the store to review those duplicates here.</p>
+    <p>Only orders placed <strong>from now on</strong> are merged automatically${S.meta.autoMerge.daily ? `, with a safety check every day at <strong>${esc(S.meta.autoMerge.daily.timeLabel)}</strong> for anything missed` : ''}. Earlier orders, including ones placed while it was off, are never merged automatically: scan the store to review those duplicates here.</p>
     ${S.meta.autoMergeOnlyPhones?.length ? `<p><strong>Test mode:</strong> only orders with phone ${esc(S.meta.autoMergeOnlyPhones.join(', '))} will be merged. Every other order is skipped.</p>` : ''}
     ${S.meta.dryRun ? '<p><strong>Practice mode:</strong> merges are only simulated.</p>' : '<p>Shopify can\'t undo a merge.</p>'}
     <div class="dlg-actions">

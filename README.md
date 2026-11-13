@@ -6,7 +6,7 @@ The order moves to the old customer, so your "points on delivery" Flow credits t
 
 ## How it works: two stages
 
-**Stage 1: merge, about 10 minutes after the order**
+**Stage 1: merge, about 10 minutes after the order** (new orders are checked every minute)
 
 1. Skips orders newer than 10 minutes, so other apps finish with the new customer first.
 2. Skips the order if its customer was not created around the time of the order.
@@ -33,10 +33,18 @@ Cancelled orders are closed without moving points. Orders not delivered within 3
 
 Nothing changes while `DRY_RUN=true`.
 
-**Stage 1 runs once a day at 11:00 am India time** (`AUTO_MERGE_TIME`, `HH:MM`; set it to empty to merge on every
-check instead). It handles all new orders since the previous run in one go; if the service was down at that time, it
-runs as soon as it's back that day, and never twice a day. Stage 2 (Flits points) still runs every
-`POLL_INTERVAL_MINUTES`. The dashboard shows a countdown to the next run.
+**When it runs.** New orders are checked every minute (`MERGE_CHECK_MINUTES`), and an order is handled once it's
+10 minutes old (`MIN_ORDER_AGE_MINUTES`), so a customer who logs in with their mobile number soon after ordering
+already sees the order in their real account. After a restart the merger looks back 48 hours (`LOOKBACK_HOURS`) to
+catch up on orders placed while it was down.
+
+**Daily safety check at 11:00 am India time** (`DAILY_CHECK_TIME`, `HH:MM`; empty turns it off). Once a day the
+merger looks back 72 hours (`DAILY_CHECK_LOOKBACK_HOURS`), merges any order that was missed, and re-checks orders
+where no duplicate was found the first time (no phone on the order yet, or no older customer with that phone yet).
+If the service was down at 11:00, it runs as soon as it's back that day, and never twice a day.
+
+Stage 2 (Flits points) runs every `POLL_INTERVAL_MINUTES`. The dashboard shows a countdown to the next check and the
+time of the next daily safety check.
 
 **Stage 1 is off by default.** Turn it on or off with the *Automatic merge after new orders* switch at the top
 of the dashboard. The setting is saved on the Volume (`data/settings.json`), so it survives redeploys, and takes

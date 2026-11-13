@@ -60,11 +60,17 @@ export const config = {
     users: process.env.DASHBOARD_USERS || '',
   },
 
+  // Flits points (stage 2) are checked this often.
   pollIntervalMinutes: num(process.env.POLL_INTERVAL_MINUTES, 5),
 
-  // Automatic merging runs once a day at this India time (HH:MM). Empty = on every check instead.
-  // Flits points are still checked every POLL_INTERVAL_MINUTES.
-  autoMergeTime: process.env.AUTO_MERGE_TIME === undefined ? '11:00' : process.env.AUTO_MERGE_TIME.trim(),
+  // New orders are checked for duplicates this often, so a customer is merged about
+  // MIN_ORDER_AGE_MINUTES after ordering (plus up to this many minutes).
+  mergeCheckMinutes: num(process.env.MERGE_CHECK_MINUTES, 1),
+
+  // Daily safety check (India time, HH:MM): once a day the merger looks back further and re-checks
+  // orders where no duplicate was found the first time. Empty = no daily check.
+  dailyCheckTime: String(process.env.DAILY_CHECK_TIME ?? process.env.AUTO_MERGE_TIME ?? '11:00').trim(),
+  dailyCheckLookbackHours: num(process.env.DAILY_CHECK_LOOKBACK_HOURS, 72),
 
   // Testing: when set (comma separated), the automatic merger only acts on orders with one of these
   // phone numbers and skips every other order. Leave empty for normal use.

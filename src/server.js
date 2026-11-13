@@ -14,7 +14,7 @@ import { config } from './config.js';
 import { fetchAllCustomers, buildPlan, checkPairs, mergePair } from './mergeService.js';
 import { readHistory, loadJson, saveJson, getAutoMerge, setAutoMerge, loadState } from './store.js';
 import { runStatus } from './status.js';
-import { mergeTime, mergeTimeLabel, nextMergeAt, lastMergeRunAt } from './schedule.js';
+import { dailyTime, dailyTimeLabel, nextDailyCheckAt, lastDailyCheckAt } from './schedule.js';
 
 // Automatic merges counted from the merge history, by Indian date.
 const istDay = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -38,13 +38,15 @@ function autoStatus() {
     },
     minOrderAgeMinutes: config.minOrderAgeMinutes,
     pollIntervalMinutes: config.pollIntervalMinutes,
-    schedule: mergeTime ? (() => {
-      const next = nextMergeAt();
+    mergeCheckMinutes: config.mergeCheckMinutes,
+    daily: dailyTime ? (() => {
+      const next = nextDailyCheckAt();
       return {
-        timeLabel: mergeTimeLabel(),
-        nextMergeAt: next,
-        nextMergeInMs: Math.max(0, Date.parse(next) - Date.now()),
-        lastMergeRunAt: lastMergeRunAt(),
+        timeLabel: dailyTimeLabel(),
+        lookbackHours: config.dailyCheckLookbackHours,
+        nextAt: next,
+        nextInMs: Math.max(0, Date.parse(next) - Date.now()),
+        lastAt: lastDailyCheckAt(),
       };
     })() : null,
   };
