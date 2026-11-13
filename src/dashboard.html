@@ -449,6 +449,12 @@ function acctHtml(acct, other, role) {
   </div>`;
 }
 
+/** Low and medium risk duplicates that merge into the same kept account as `p`. */
+function groupOf(p) {
+  if (p.risk !== 'low' && p.risk !== 'medium') return [p];
+  return S.plan.pairs.filter((q) => q.keep.id === p.keep.id && (q.risk === 'low' || q.risk === 'medium'));
+}
+
 function pairHtml(p) {
   const canPick = p.risk === 'low' || p.risk === 'medium';
   const sel = S.selected.has(p.key);
@@ -457,6 +463,9 @@ function pairHtml(p) {
     actions = `<a class="btn" href="${adminUrl(p.keep.id)}" target="_blank" rel="noopener">Merge in Shopify</a>`;
   } else if (p.risk === 'high') {
     actions = `<button class="btn primary" type="button" data-act="review" data-key="${esc(p.key)}">Review and merge</button>`;
+  } else if (groupOf(p).length > 1) {
+    // Several duplicates of the same kept account: merge them all in one go.
+    actions = `<button class="btn" type="button" data-act="group" data-key="${esc(p.key)}">Merge all ${groupOf(p).length}</button>`;
   } else {
     actions = `<button class="btn" type="button" data-act="one" data-key="${esc(p.key)}">Merge</button>`;
   }
@@ -482,7 +491,7 @@ function pairHtml(p) {
       ${S.meta.flitsEnabled ? `<div class="meta">${p.points ? `${fmtPts(p.points)} points to move` : 'No points to move'}</div>` : ''}
     </div>
     <div class="acts">${actions}</div>
-    <div class="why">${reasons}</div>
+    <div class="why">${reasons}${groupOf(p).length > 1 ? `${reasons ? '. ' : ''}<span>This account has ${groupOf(p).length} duplicate accounts with this phone; Merge all merges them together.</span>` : ''}</div>
   </div>`;
 }
 
@@ -523,6 +532,7 @@ $('list').addEventListener('click', (e) => {
   if (b.dataset.act === 'more') { S.shown += 200; renderList(); }
   if (b.dataset.act === 'scan') startScan();
   if (b.dataset.act === 'one' && pair) confirmMerge([pair]);
+  if (b.dataset.act === 'group' && pair) confirmMerge(groupOf(pair));
   if (b.dataset.act === 'review' && pair) reviewHighRisk(pair);
   if (b.dataset.act === 'dismiss' && pair) confirmDismiss(pair);
 });
@@ -691,6 +701,10 @@ function confirmMerge(pairs) {
   openDialog(`
     <h2>${one ? 'Merge these accounts?' : `Merge ${pairs.length} duplicate accounts?`}</h2>
     ${one ? `<p>${esc(one.dup.name || one.dup.email)} will be merged into ${esc(one.keep.name || one.keep.email)} (${esc(fmtPhone(one.phone))}).</p>` : ''}
+    ${!one && pairs.every((q) => q.keep.id === pairs[0].keep.id)
+      ? `<p>These accounts will be merged into ${esc(pairs[0].keep.name || pairs[0].keep.email)} (${esc(fmtPhone(pairs[0].phone))}):</p>
+         <ul>${pairs.map((q) => `<li>${esc(q.dup.name || 'No name')}, ${esc(q.dup.email || 'no email')}, ${q.dup.orders} order${q.dup.orders === 1 ? '' : 's'}</li>`).join('')}</ul>`
+      : ''}
     <p>Orders, addresses and tags move to the account that's kept, and the duplicate account is deleted.
     ${S.meta.flitsEnabled && pts ? `${fmtPts(pts)} Flits points will be added to the kept accounts.` : ''}</p>
     <p>Shopify can't undo a merge. Each pair is checked again with Shopify just before it's merged.</p>
