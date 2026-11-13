@@ -121,7 +121,11 @@ function merge(keys, by, emailChoice = {}) {
         } catch (err) {
           r = { ok: false, status: 'failed', message: err.message };
         }
-        if (r.status === 'merged' || r.status === 'needs-attention') {
+        if (r.status === 'gone') {
+          // One of the accounts no longer exists: drop this pair so it can't fail again.
+          plan.pairs = plan.pairs.filter((p) => p.key !== pair.key);
+          savePlan();
+        } else if (r.status === 'merged' || r.status === 'needs-attention') {
           // The duplicate no longer exists: drop every pair that involves it.
           plan.pairs = plan.pairs.filter((p) => p.dup.id !== pair.dup.id && p.keep.id !== pair.dup.id);
           savePlan();

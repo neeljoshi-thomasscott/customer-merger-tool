@@ -218,10 +218,11 @@ export async function mergePair(pair, { actor = 'system', source = 'dashboard', 
   try {
     check = await checkWithShopify(pair);
   } catch (err) {
-    const message = /not exist|invalid id|not found/i.test(err.message)
-      ? 'One of the accounts no longer exists (already merged or deleted)'
-      : `Check failed: ${err.message}`;
-    return { ok: false, status: 'failed', message };
+    if (/not exist|invalid id|not found/i.test(err.message)) {
+      // Merged or deleted somewhere else (e.g. in Shopify admin) since the last scan.
+      return { ok: false, status: 'gone', message: 'Already merged or deleted in Shopify since the last scan; removed from the list' };
+    }
+    return { ok: false, status: 'failed', message: `Check failed: ${err.message}` };
   }
   if (!check.ok) return { ok: false, status: 'blocked', message: check.reason };
 
