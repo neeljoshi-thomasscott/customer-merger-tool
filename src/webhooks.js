@@ -24,10 +24,24 @@ mutation Sub($sub: WebhookSubscriptionInput!) {
 
 /** True when the X-Shopify-Hmac-Sha256 header matches the raw request body. */
 export function validSignature(rawBody, header) {
-  if (!config.clientSecret || !header) return false;
-  const expected = crypto.createHmac('sha256', config.clientSecret).update(rawBody).digest();
+  if (!header) return false;
   const given = Buffer.from(String(header), 'base64');
-  return given.length === expected.length && crypto.timingSafeEqual(given, expected);
+  // SHOPIFY_WEBHOOK_SECRET only if Shopify signs with a different secret than the client secret.
+  const secrets = [...new Set([process.env.SHOPIFY_WEBHOOK_SECRET, config.clientSecret, config.clientSecret.trim()]
+    .filter(Boolean))];
+  return secrets.some((secret) => {
+    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest();
+    return given.length === expected.length && crypto.timingSafeEqual(given, expected);
+  });
+}
+
+/** What a rejected request looked like (no secrets), to find out why a signature didn't match. */
+export function describeRequest(req, rawBody) {
+  const h = req.headers;
+  return `topic ${h['x-shopify-topic'] || '-'}, shop ${h['x-shopify-shop-domain'] || '-'}, `
+    + `api ${h['x-shopify-api-version'] || '-'}, signature ${h['x-shopify-hmac-sha256'] ? `${String(h['x-shopify-hmac-sha256']).length} chars` : 'missing'}, `
+    + `body ${rawBody.length} bytes, encoding ${h['content-encoding'] || 'none'}, `
+    + `secret ${config.clientSecret.length} chars${config.clientSecret !== config.clientSecret.trim() ? ' (has spaces)' : ''}`;
 }
 
 /** Makes sure Shopify sends new orders to this tool. Safe to run on every start. */

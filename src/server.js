@@ -14,7 +14,7 @@ import { config } from './config.js';
 import { fetchAllCustomers, buildPlan, checkPairs, mergePair } from './mergeService.js';
 import { readHistory, loadJson, saveJson, getAutoMerge, setAutoMerge, loadState } from './store.js';
 import { runStatus, hooks } from './status.js';
-import { WEBHOOK_PATH, validSignature } from './webhooks.js';
+import { WEBHOOK_PATH, validSignature, describeRequest } from './webhooks.js';
 import { dailyTime, dailyTimeLabel, nextDailyCheckAt, lastDailyCheckAt } from './schedule.js';
 
 // Automatic merges counted from the merge history, by Indian date.
@@ -165,7 +165,7 @@ function readRaw(req) {
 async function orderWebhook(req, res) {
   const raw = await readRaw(req);
   if (!validSignature(raw, req.headers['x-shopify-hmac-sha256'])) {
-    console.warn(`webhook: rejected a request without a valid Shopify signature from ${clientIp(req)}`);
+    console.warn(`webhook: rejected a request without a valid Shopify signature from ${clientIp(req)} (${describeRequest(req, raw)})`);
     return send(res, 401, { error: 'Invalid signature' });
   }
   send(res, 200, { ok: true }); // answer at once; Shopify retries if it waits more than 5 seconds
