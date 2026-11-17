@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from './config.js';
+import { config, brands, withBrand, currentBrand, setPracticeSwitch } from './config.js';
 
 // Every file is in the data folder of the brand the current request or job is for.
 const made = new Set();
@@ -128,6 +128,29 @@ export function setAutoMerge(enabled, by) {
   settings.autoMerge = { enabled: enabled === true, by, at: new Date().toISOString() };
   saveJson('settings.json', settings);
   return settings.autoMerge;
+}
+
+// ---------- Practice mode, switched from the dashboard ----------
+// null until someone uses the switch; the brand's DRY_RUN variable applies until then.
+export function getPractice() {
+  const s = loadJson('settings.json', {}).practice;
+  return typeof s?.enabled === 'boolean' ? { enabled: s.enabled, by: s.by || '', at: s.at || '' } : null;
+}
+
+export function setPractice(enabled, by) {
+  const settings = loadJson('settings.json', {});
+  settings.practice = { enabled: enabled === true, by, at: new Date().toISOString() };
+  saveJson('settings.json', settings);
+  setPracticeSwitch(currentBrand().id, settings.practice.enabled);
+  return settings.practice;
+}
+
+// At start, every brand gets the mode it was last switched to.
+for (const b of brands) {
+  withBrand(b, () => {
+    const p = getPractice();
+    if (p) setPracticeSwitch(b.id, p.enabled);
+  });
 }
 
 // ---------- Points already moved, per duplicate customer ----------

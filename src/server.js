@@ -13,9 +13,9 @@ import http from 'node:http';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { config, brands, findBrand, brandByShop, withBrand, currentBrand } from './config.js';
+import { config, brands, findBrand, brandByShop, withBrand, currentBrand, isPractice, forcedPractice } from './config.js';
 import { fetchAllCustomers, buildPlan, checkPairs, mergePair } from './mergeService.js';
-import { readHistory, loadJson, saveJson, getAutoMerge, setAutoMerge, loadState } from './store.js';
+import { readHistory, loadJson, saveJson, getAutoMerge, setAutoMerge, loadState, getPractice, setPractice } from './store.js';
 import { runStatus, hooks } from './status.js';
 import { WEBHOOK_PATH, validSignature, describeRequest } from './webhooks.js';
 import { dailyTime, dailyTimeLabel, nextDailyCheckAt, lastDailyCheckAt } from './schedule.js';
@@ -287,10 +287,12 @@ async function brandRoute(req, res, route, user, url) {
         user,
         brand: brand.id,
         brandName: brand.name,
-        brands: brands.map((b) => ({ id: b.id, name: b.name, dryRun: b.dryRun })),
+        brands: brands.map((b) => ({ id: b.id, name: b.name, dryRun: isPractice(b) })),
         shop: config.shop,
         adminBase: brand.adminBase,
         dryRun: config.dryRun,
+        // Who last switched practice mode (null: still the DRY_RUN starting value), and whether --dry-run forces it.
+        practice: { switched: getPractice(), forced: forcedPractice },
         flitsEnabled: config.flits.enabled,
         tempEmailPattern: config.tempEmailPattern,
         tempEmailDomain: tempEmailDomain(config.tempEmailPattern),
@@ -305,6 +307,23 @@ async function brandRoute(req, res, route, user, url) {
       const s = setAutoMerge(body.enabled, user);
       console.log(`Automatic merging turned ${s.enabled ? 'ON' : 'OFF'} by ${user}`);
       return send(res, 200, autoStatus());
+    }
+
+    case 'POST /api/practice': {
+      const body = await readBody(req);
+      if (typeof body.enabled !== 'boolean') return send(res, 400, { error: 'enabled must be true or false' });
+      if (forcedPractice) return send(res, 400, { error: 'This server was started with --dry-run, so it always stays in practice mode' });
+      // A scan or merge batch must not run half in practice mode and half live.
+      if (task?.status === 'running') return send(res, 409, { error: 'Wait until the running scan or merge has finished' });
+      if (!body.enabled) {
+        if (body.confirm !== true) return send(res, 400, { error: 'Confirm that merges will really change customers' });
+        if (config.onRailway && !config.hasRailwayVolume && !process.env.DATA_DIR) {
+          return send(res, 400, { error: 'No Railway Volume is attached, so the record of points already moved would be lost on the next redeploy. Attach a Volume before going live.' });
+        }
+      }
+      const p = setPractice(body.enabled, user);
+      console.log(`Practice mode turned ${p.enabled ? 'ON' : 'OFF, now LIVE'} by ${user}`);
+      return send(res, 200, { ok: true, dryRun: config.dryRun });
     }
 
     case 'GET /api/auto-status':
@@ -390,6 +409,6 @@ http.createServer((req, res) => {
   });
 }).listen(config.dashboard.port, config.dashboard.host, () => {
   hooks.serverReady = true;
-  const modes = brands.map((b) => `${b.name}: ${b.dryRun ? 'practice mode, DRY_RUN=true' : 'LIVE'}`).join('; ');
+  const modes = brands.map((b) => `${b.name}: ${isPractice(b) ? 'practice mode' : 'LIVE'}`).join('; ');
   console.log(`Dashboard: http://${config.dashboard.host}:${config.dashboard.port}  (${modes})`);
 });

@@ -80,6 +80,10 @@ a.btn { text-decoration: none; color: var(--ink); display: inline-block; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 
 .banner { border: 1px solid var(--medium); background: var(--medium-bg); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; }
+.banner.live { border-color: var(--line); background: var(--surface); }
+.mode-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.mode-row .meta { color: var(--muted); font-size: 13px; }
+.mode-live { color: var(--low); font-weight: 600; }
 .auto { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
   border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; }
 .auto[hidden] { display: none; }
@@ -142,6 +146,23 @@ body.busy { overflow: hidden; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
 .tab { border: 0; background: none; padding: 10px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
 .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tabhint { color: var(--muted); font-size: 13.5px; margin: -6px 0 14px; max-width: 80ch; }
+.tabhint a { color: var(--accent); }
+
+/* How it works */
+.head-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.guide h3 { font-size: 15px; font-weight: 600; margin: 18px 0 6px; }
+.guide ul, .guide ol { margin: 6px 0; padding-left: 20px; }
+.guide li { margin: 3px 0; }
+.guide table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 6px; }
+.guide th, .guide td { text-align: left; vertical-align: top; padding: 7px 8px; border-top: 1px solid var(--line); }
+.guide th { color: var(--muted); font-weight: 500; font-size: 13px; }
+.guide td:first-child { white-space: nowrap; font-weight: 500; }
+.guide .lvl { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12.5px; font-weight: 500; }
+.guide .lvl.low { color: var(--low); background: var(--low-bg); }
+.guide .lvl.medium { color: var(--medium); background: var(--medium-bg); }
+.guide .lvl.high { color: var(--high); background: var(--high-bg); }
+.guide .lvl.blocked { color: var(--blocked); background: var(--blocked-bg); }
 
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
 .search { flex: 1 1 260px; max-width: 420px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
@@ -244,12 +265,13 @@ dialog::backdrop { background: rgba(10, 14, 25, .45); }
       </div>
       <div class="sub" id="sub">Loading…</div>
     </div>
-    <button class="btn primary" id="scanBtn" type="button">Scan store</button>
+    <div class="head-acts">
+      <button class="btn" id="guideBtn" type="button">How it works</button>
+      <button class="btn primary" id="scanBtn" type="button">Scan store</button>
+    </div>
   </header>
 
-  <div class="banner" id="practice" hidden>
-    Practice mode is on (<code>DRY_RUN=true</code>). Merges are only checked and simulated; no customer or points change.
-  </div>
+  <div class="banner" id="practice" hidden></div>
 
   <div class="auto" id="auto" hidden></div>
 
@@ -264,6 +286,7 @@ dialog::backdrop { background: rgba(10, 14, 25, .45); }
     <button class="tab" role="tab" aria-selected="false" data-tab="history" id="tab-history">Merged</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="dismissed" id="tab-dismissed">Not duplicates</button>
   </div>
+  <p class="tabhint" id="tabHint"></p>
 
   <section id="view-review" role="tabpanel" aria-labelledby="tab-review">
     <div class="toolbar">
@@ -379,9 +402,12 @@ async function init() {
     $('brandPick').hidden = false;
     document.title = `${S.meta.brandName}: duplicate customers`;
   }
-  $('practice').hidden = !S.meta.dryRun;
+  renderMode();
   renderAuto();
+  renderTabHint();
   await loadPlan();
+  // First visit on this computer: show the guide once.
+  if (!store.get('guideSeen')) { store.set('guideSeen', '1'); openGuide(); }
   const t = await api('/api/task');
   if (t.status) renderTask(t);
   if (t.status === 'running') poll();
@@ -747,6 +773,7 @@ function confirmAuto() {
 
 // ---------- Dialogs ----------
 function openDialog(html) {
+  if ($('dlg').open) $('dlg').close(); // e.g. the guide was still open
   $('dlgBody').innerHTML = html;
   $('dlg').showModal();
 }
@@ -1020,6 +1047,153 @@ function renderTask(t) {
   if (hide) hide.addEventListener('click', () => { el.hidden = true; });
 }
 
+// ---------- Practice mode switch (per brand) ----------
+function renderMode() {
+  const m = S.meta;
+  const sw = m.practice?.switched;
+  const who = m.practice?.forced ? 'The server was started with --dry-run, so it always stays in practice mode.'
+    : sw ? `Switched ${sw.enabled ? 'on' : 'off'} by ${esc(sw.by)}, ${fmtTime(sw.at)}.`
+    : 'Starting mode from the server settings; nobody has switched it yet.';
+  const el = $('practice');
+  el.hidden = false;
+  el.classList.toggle('live', !m.dryRun);
+  el.innerHTML = m.dryRun
+    ? `<div class="mode-row"><div><strong>Practice mode is on${m.brands.length > 1 ? ` for ${esc(m.brandName)}` : ''}.</strong>
+         Merges are only checked and simulated; no customer${m.flitsEnabled ? ' or points' : ''} change. <span class="meta">${who}</span></div>
+         ${m.practice?.forced ? '' : '<button class="btn" type="button" id="modeBtn">Go live</button>'}</div>`
+    : `<div class="mode-row"><div><span class="mode-live">Live${m.brands.length > 1 ? `: ${esc(m.brandName)}` : ''}.</span>
+         Merges really change customers in Shopify and can’t be undone. <span class="meta">${who}</span></div>
+         <button class="btn" type="button" id="modeBtn">Turn on practice mode</button></div>`;
+}
+
+$('practice').addEventListener('click', (e) => {
+  if (e.target.id !== 'modeBtn') return;
+  if (S.meta.dryRun) confirmGoLive();
+  else switchPractice(true, e.target);
+});
+
+async function switchPractice(practice, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    await api('/api/practice', { enabled: practice, confirm: !practice });
+    location.reload(); // every label, count and button on the page follows the new mode
+  } catch (err) {
+    alert(err.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
+function confirmGoLive() {
+  const m = S.meta;
+  const auto = m.autoMerge?.enabled;
+  openDialog(`
+    <h2>Go live${m.brands.length > 1 ? ` with ${esc(m.brandName)}` : ''}?</h2>
+    <p>Practice mode turns off for <strong>${esc(m.brandName)}</strong> (${esc(m.shop)}) only. From then on:</p>
+    <ul class="reasons">
+      <li>Merges from this dashboard really merge customers in Shopify. <strong>Shopify can’t undo a merge.</strong></li>
+      ${m.flitsEnabled ? '<li>Flits loyalty points really move to the kept accounts.</li>' : ''}
+      <li>Temporary emails are replaced and a note is added to the kept customers in Shopify.</li>
+      <li>${auto ? '<strong>Automatic merge is on</strong>, so new orders’ duplicate accounts are merged for real too.' : 'Automatic merge is off; it only merges new orders once someone turns it on.'}</li>
+    </ul>
+    <p>You can turn practice mode back on at any time with the button in the banner.</p>
+    <label class="confirm"><input type="checkbox" id="liveSure"> <span>I understand that merges will really change customers in ${esc(m.brandName)}.</span></label>
+    <div class="dlg-actions">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn danger" type="button" id="goLive" disabled>Go live</button>
+    </div>`);
+  $('liveSure').addEventListener('change', (e) => { $('goLive').disabled = !e.target.checked; });
+  $('goLive').addEventListener('click', (e) => switchPractice(false, e.target));
+}
+
+// ---------- What each tab is for, and the full guide ----------
+const TAB_HINTS = {
+  review: 'Customers with two or more accounts that share one phone number. The account that logs in with that phone is kept; the others are merged into it.',
+  nophone: 'Old accounts with no phone at all, from before mobile-number login, matched to the customer’s mobile-number account by name, pincode and email. No phone proves it’s the same person, so check before merging.',
+  history: 'Every merge so far: by the team here, by the automatic merger after new orders, or by the cleanup script. Shows who merged, the risk level and the Flits points moved.',
+  dismissed: 'Pairs someone marked “Not the same person”. Scans skip them. Restore one to see it again after the next scan.',
+};
+
+function renderTabHint() {
+  $('tabHint').innerHTML = `${esc(TAB_HINTS[S.tab] || '')} <a href="#" id="hintGuide">How it works</a>`;
+}
+$('tabHint').addEventListener('click', (e) => { if (e.target.id === 'hintGuide') { e.preventDefault(); openGuide(); } });
+$('guideBtn').addEventListener('click', () => openGuide());
+
+function openGuide() {
+  const m = S.meta || {};
+  const a = m.autoMerge || {};
+  const flits = Boolean(m.flitsEnabled);
+  const brands = (m.brands || []).length > 1;
+  const lvl = (r, t) => `<span class="lvl ${r}">${t}</span>`;
+  openDialog(`<div class="guide">
+    <h2 tabindex="-1" autofocus style="outline:none">How this tool works</h2>
+    <p>Customers sometimes end up with more than one account, for example one from an old email login and one from mobile-number
+    login. This tool finds those duplicates and merges them into one account in Shopify, so the customer sees all their orders${flits ? ' and loyalty points' : ''} in one place.</p>
+
+    <h3>Start here</h3>
+    <ol>
+      ${brands ? `<li><strong>Choose the brand</strong> in the dropdown next to the title. Each brand has its own store, list, history and settings; you are now on <strong>${esc(m.brandName)}</strong>.</li>` : ''}
+      <li>Click <strong>Scan store</strong>. It reads every customer and lists the duplicates it finds. This can take a few minutes, and the result is saved until the next scan. Scan again after customers change in Shopify.</li>
+      <li>Work through <strong>To review</strong> and <strong>No mobile number</strong>, then check the result in <strong>Merged</strong>.</li>
+    </ol>
+    ${m.dryRun ? '<p><strong>Practice mode is on for this brand:</strong> every merge is only checked and simulated, so it is safe for training. Nothing changes in Shopify or Flits.</p>' : '<p><strong>This brand is live:</strong> merges really change customers in Shopify, and Shopify can’t undo a merge.</p>'}
+    <p>The banner at the top switches practice mode on and off for this brand. Going live asks for confirmation; it can’t be switched while a scan or merge is running.</p>
+
+    <h3>The tabs</h3>
+    <table>
+      <tr><th>Tab</th><th>What it shows</th></tr>
+      <tr><td>To review</td><td>${esc(TAB_HINTS.review)}</td></tr>
+      <tr><td>No mobile number</td><td>${esc(TAB_HINTS.nophone)} A matching name alone is never suggested.</td></tr>
+      <tr><td>Merged</td><td>${esc(TAB_HINTS.history)}</td></tr>
+      <tr><td>Not duplicates</td><td>${esc(TAB_HINTS.dismissed)}</td></tr>
+    </table>
+
+    <h3>Risk levels</h3>
+    <p>Each pair gets a risk level. The coloured boxes above the tabs count them; click one to show only that level.</p>
+    <div class="tablewrap"><table>
+      <tr><th>Level</th><th>To review (same phone)</th><th>No mobile number</th><th>How to merge</th></tr>
+      <tr><td>${lvl('low', 'Low')}</td><td>Same first name, and the kept account logs in with this phone</td><td>Never low</td><td>Select several and merge together</td></tr>
+      <tr><td>${lvl('medium', 'Medium')}</td><td>Last names differ, a name is missing, the duplicate has 5+ orders, or neither account logs in with the phone</td><td>Same name and same pincode, or same name and similar email</td><td>Check, then select and merge together</td></tr>
+      <tr><td>${lvl('high', 'High')}</td><td>First names differ (often a gift or family order), or several customers match</td><td>Only name and city, only a similar email, names differ, or several customers match</td><td><strong>One at a time:</strong> Review and merge opens both accounts side by side</td></tr>
+      <tr><td>${lvl('blocked', 'Blocked')}</td><td colspan="2">Shopify refuses this merge, or would keep the wrong account</td><td>Only in Shopify admin (the button opens it)</td></tr>
+    </table></div>
+
+    <h3>Buttons on each pair</h3>
+    <ul>
+      <li><strong>Merge</strong>: merges this one pair. The dialog lets you choose which account to keep and which email stays.</li>
+      <li><strong>Merge all N</strong>: one kept account has several duplicates; merges them all into it.</li>
+      <li><strong>Review and merge</strong> (high risk): compare both accounts, tick “I checked both accounts”, then merge.</li>
+      <li><strong>Not the same person</strong>: removes the pair from the list for good (it moves to Not duplicates).</li>
+      <li><strong>Select all low / medium risk</strong> and the tick boxes: choose many pairs, then use the bar at the bottom to merge them together.</li>
+      <li><strong>Open in Shopify</strong>: opens the customer in Shopify admin, to check orders and addresses before merging.</li>
+    </ul>
+
+    <h3>What a merge does</h3>
+    <ul>
+      <li>Orders, addresses and tags move to the account that’s kept. The duplicate account is deleted. <strong>Shopify can’t undo this.</strong></li>
+      <li>Each pair is checked with Shopify again just before merging, so an old list can’t merge the wrong way.</li>
+      <li>The kept account keeps its mobile-number login. If it only had a made-up temporary email, the duplicate’s real email can replace it (you choose in the dialog).</li>
+      ${flits ? '<li>Flits loyalty points on the duplicate are added to the kept account.</li>' : ''}
+      <li>A note starting “Customer merger tool:” is added to the kept customer in Shopify, so anyone can see what happened.</li>
+    </ul>
+
+    <h3>Automatic merge after new orders</h3>
+    <p>The switch at the top. When it’s on, ${a.minOrderAgeMinutes ? `${esc(a.minOrderAgeMinutes)} minutes` : 'a few minutes'} after each new order the tool checks whether the customer
+    just created a new account although an older account has the same phone number, and merges the new account into the older one.
+    Only orders placed after it was switched on are merged${a.daily ? `, with a safety check every day at ${esc(a.daily.timeLabel)} for anything missed` : ''}.
+    ${flits ? 'Flits points for those orders are moved about an hour after the order is delivered.' : ''}
+    Everything older is left for the team to review here. The switch is per brand${a.enabled ? '; it is <strong>on</strong> for this brand' : '; it is <strong>off</strong> for this brand'}.</p>
+
+    <h3>Good to know</h3>
+    <ul>
+      <li>Your login name is shown in the Merged tab next to every merge you make.</li>
+      <li>You can close the page while a scan or merge runs; it keeps going on the server.</li>
+      <li>If a pair says it’s no longer there, it was merged or deleted in Shopify meanwhile. Scan again.</li>
+    </ul>
+    <div class="dlg-actions"><button class="btn primary" type="button" data-close>Got it</button></div>
+  </div>`);
+}
+
 // ---------- Tabs ----------
 document.querySelector('.tabs').addEventListener('click', (e) => {
   const tab = e.target.closest('.tab');
@@ -1037,6 +1211,7 @@ document.querySelector('.tabs').addEventListener('click', (e) => {
   }
   for (const v of ['review', 'history', 'dismissed']) $(`view-${v}`).hidden = v !== (S.tab === 'nophone' ? 'review' : S.tab);
   $('bulk').hidden = !list || S.selected.size === 0;
+  renderTabHint();
   if (S.tab === 'history') loadHistory();
   if (S.tab === 'dismissed') loadDismissed();
 });

@@ -31,7 +31,19 @@ Flow time to credit the points), it:
 Cancelled orders are closed without moving points. Orders not delivered within 30 days
 (`POINTS_MAX_WAIT_DAYS`) are listed in `needs-attention.csv`.
 
-Nothing changes while `DRY_RUN=true`.
+Nothing changes while the brand is in practice mode (see *Practice mode* below).
+
+## Practice mode
+
+Each brand is either in **practice mode** (merges are checked and simulated, nothing changes in Shopify or Flits) or
+**live**. The banner at the top of the dashboard switches it for the brand that's selected: **Go live** asks for a tick
+box confirmation; **Turn on practice mode** takes effect at once. The switch can't be used while a scan or merge is
+running, it says who switched it and when, and it's saved with the brand's records on the Volume, so it survives
+redeploys.
+
+`DRY_RUN` (and `DOCKERS_DRY_RUN`) only set the **starting** mode of a brand nobody has switched yet, so new brands start
+in practice mode. After the first switch, the dashboard decides. Command-line runs with `--dry-run` are always in
+practice mode.
 
 **When it runs.** The tool doesn't scan the store on a timer. On start it subscribes to Shopify's *order created*
 webhook at `<PUBLIC_URL>/webhooks/orders-create` (on Railway the generated domain is used automatically). Each
@@ -77,7 +89,7 @@ records. The brands share only the team's logins and the timing settings (`MIN_O
   | `DOCKERS_BRAND_NAME` | `Dockers` |
   | `DOCKERS_SHOPIFY_SHOP` | Dockers' `….myshopify.com` address |
   | `DOCKERS_SHOPIFY_CLIENT_ID`, `DOCKERS_SHOPIFY_CLIENT_SECRET` | From an app installed on the Dockers store (see Setup) |
-  | `DOCKERS_DRY_RUN` | `true` until the Dockers results are reviewed (the default) |
+  | `DOCKERS_DRY_RUN` | Starting mode: `true` (practice, the default). Go live later with the dashboard's switch |
   | `DOCKERS_TEMP_EMAIL_PATTERN` | Dockers' made-up email format, e.g. `^[0-9a-f]{32}@dockers\.in$`. Empty: no temporary emails |
   | `DOCKERS_FLITS_ENABLED`, `DOCKERS_FLITS_READ_API_KEY`, `DOCKERS_FLITS_ADD_API_KEY`, `DOCKERS_FLITS_ADD_POINTS_ACTION_ID` | Dockers' Flits keys and action ID, from Flits support |
 
@@ -117,7 +129,7 @@ Railway also never runs two copies of a service that has a Volume, so nothing ca
    `Dashboard: ... (practice mode, DRY_RUN=true)`.
 7. **Try it in practice mode.** Scan the store in the dashboard, and check the automatic merger's log
    lines after a few new orders.
-8. **Go live.** Change `DRY_RUN` to `false`. Railway redeploys automatically.
+8. **Go live.** Click **Go live** in the dashboard's banner, for each brand. No redeploy is needed.
 
 Notes:
 
@@ -238,7 +250,7 @@ Other things the dashboard does:
   automatic), the risk level and the points moved.
 - Each pair is checked with Shopify again right before merging, so a list that's out of date can't merge
   the wrong way.
-- With `DRY_RUN=true` the dashboard runs in practice mode: merges are checked and simulated only. This is
+- In practice mode (the banner's switch) merges are checked and simulated only. This is
   useful for training the team.
 
 **Sharing with the team:** by default the dashboard only listens on the server itself (`127.0.0.1`). To

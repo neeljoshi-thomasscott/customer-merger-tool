@@ -1,7 +1,8 @@
 // Production entry point (Railway): runs the dashboard AND the automatic merger in one process.
 // Both share one data folder on one Railway Volume, which is why they must be one service.
 
-import { config, brands, anyLive } from './config.js';
+import { config, brands, anyLive, isPractice } from './config.js';
+import './store.js'; // applies each brand's practice mode switch before the checks below
 
 if (config.onRailway && !config.hasRailwayVolume && !process.env.DATA_DIR) {
   const msg = 'No Railway Volume is attached. Without it, the record of points already moved is wiped on '
@@ -14,6 +15,6 @@ if (config.onRailway && !config.hasRailwayVolume && !process.env.DATA_DIR) {
 }
 
 console.log(`Data folder: ${config.rootDataDir}`);
-console.log(`Brands: ${brands.map((b) => `${b.name} (${b.shop}, ${b.dryRun ? 'practice mode' : 'LIVE'}, data ${b.dataDir})`).join('; ')}`);
+console.log(`Brands: ${brands.map((b) => `${b.name} (${b.shop}, ${isPractice(b) ? 'practice mode' : 'LIVE'}, data ${b.dataDir})`).join('; ')}`);
 await import('./server.js');   // dashboard + /health for Railway
 await import('./run.js');      // automatic merge after new orders + points after delivery

@@ -116,8 +116,9 @@ function readBrand(id, prefix, main) {
     // Only if Shopify signs webhooks with a different secret than the client secret.
     webhookSecret: env('SHOPIFY_WEBHOOK_SECRET') || '',
 
-    // Safety: nothing is changed unless DRY_RUN=false (per brand) and --dry-run is not passed.
-    dryRun: forceDryRun || bool(env('DRY_RUN'), true),
+    // Practice mode until someone switches it on the dashboard (see isPractice). DRY_RUN only sets
+    // the starting mode; --dry-run on the command line always forces practice mode.
+    envDryRun: bool(env('DRY_RUN'), true),
 
     // Placeholder emails given to accounts created with only a mobile number (regular expression).
     // In a merge, a real email from the duplicate replaces such an email on the kept account. Empty = off.
@@ -174,7 +175,17 @@ export const brands = readBrands();
 export const mainBrand = brands[0];
 export const findBrand = (id) => brands.find((b) => b.id === String(id || '').trim().toLowerCase()) || null;
 export const brandByShop = (shop) => brands.find((b) => b.shop === String(shop || '').trim().toLowerCase()) || null;
-export const anyLive = () => brands.some((b) => !b.dryRun);
+// ---------- Practice mode ----------
+// Switched per brand on the dashboard and saved with the brand's records (store.js applies the saved
+// choice at start). A brand nobody has switched yet uses its DRY_RUN variable.
+const practiceSwitch = new Map(); // brand id -> true (practice) / false (live)
+export const forcedPractice = forceDryRun;
+export function setPracticeSwitch(id, practice) { practiceSwitch.set(id, practice === true); }
+export function isPractice(brand) {
+  if (forceDryRun) return true;
+  return practiceSwitch.has(brand.id) ? practiceSwitch.get(brand.id) : brand.envDryRun;
+}
+export const anyLive = () => brands.some((b) => !isPractice(b));
 
 const current = new AsyncLocalStorage();
 
@@ -197,10 +208,12 @@ export function brandsFromArgs() {
   return [b];
 }
 
-const BRAND_KEYS = new Set(['shop', 'accessToken', 'clientId', 'clientSecret', 'webhookSecret', 'dryRun', 'tempEmailPattern', 'flits', 'dataDir']);
+const BRAND_KEYS = new Set(['shop', 'accessToken', 'clientId', 'clientSecret', 'webhookSecret', 'tempEmailPattern', 'flits', 'dataDir']);
 
 export const config = new Proxy(shared, {
   get(target, key) {
+    // Read on every use, so a switch on the dashboard applies to the very next merge.
+    if (key === 'dryRun') return isPractice(currentBrand());
     return BRAND_KEYS.has(key) ? currentBrand()[key] : target[key];
   },
   set() { throw new Error('config is read-only'); },
