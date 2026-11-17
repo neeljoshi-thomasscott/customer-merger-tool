@@ -2,10 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
 
-fs.mkdirSync(config.dataDir, { recursive: true });
-const statePath = path.join(config.dataDir, 'state.json');
+// Every file is in the data folder of the brand the current request or job is for.
+const made = new Set();
+function file(name) {
+  const dir = config.dataDir;
+  if (!made.has(dir)) { fs.mkdirSync(dir, { recursive: true }); made.add(dir); }
+  return path.join(dir, name);
+}
 
 export function loadState() {
+  const statePath = file('state.json');
   try {
     const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
     if (state.movedPoints) migrateMovedPoints(state.movedPoints);
@@ -22,14 +28,15 @@ export function saveState(state) {
     if (Date.parse(entry.at) < cutoff) delete state.processed[orderId];
   }
   delete state.movedPoints; // kept in moved-points.json now
+  const statePath = file('state.json');
   fs.writeFileSync(statePath + '.tmp', JSON.stringify(state, null, 2));
   fs.renameSync(statePath + '.tmp', statePath);
 }
 
 const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
-export function appendCsv(file, header, row) {
-  const p = path.join(config.dataDir, file);
+export function appendCsv(name, header, row) {
+  const p = file(name);
   if (!fs.existsSync(p)) fs.writeFileSync(p, header.map(cell).join(',') + '\n');
   fs.appendFileSync(p, row.map(cell).join(',') + '\n');
 }
@@ -62,14 +69,15 @@ export function logPoints(p, status, points, details) {
 }
 
 // ---------- Merge history (shared by dashboard, cleanup script and automatic merges) ----------
-const historyPath = path.join(config.dataDir, 'merge-history.jsonl');
+const historyFile = () => file('merge-history.jsonl');
 
 export function recordHistory(entry) {
-  fs.appendFileSync(historyPath, JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n');
+  fs.appendFileSync(historyFile(), JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n');
 }
 
 /** Updates the newest history entry matching `match` (e.g. once the points step has finished). */
 export function updateHistory(match, patch) {
+  const historyPath = historyFile();
   if (!fs.existsSync(historyPath)) return false;
   const lines = fs.readFileSync(historyPath, 'utf8').split('\n').filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -85,6 +93,7 @@ export function updateHistory(match, patch) {
 }
 
 export function readHistory(limit = 2000) {
+  const historyPath = historyFile();
   if (!fs.existsSync(historyPath)) return [];
   const lines = fs.readFileSync(historyPath, 'utf8').trim().split('\n').filter(Boolean);
   return lines.slice(-limit).reverse().map((l) => {
@@ -95,14 +104,14 @@ export function readHistory(limit = 2000) {
 // ---------- Small JSON files (dismissed pairs, last scan) ----------
 export function loadJson(name, fallback) {
   try {
-    return JSON.parse(fs.readFileSync(path.join(config.dataDir, name), 'utf8'));
+    return JSON.parse(fs.readFileSync(file(name), 'utf8'));
   } catch {
     return fallback;
   }
 }
 
 export function saveJson(name, value) {
-  const p = path.join(config.dataDir, name);
+  const p = file(name);
   fs.writeFileSync(p + '.tmp', JSON.stringify(value));
   fs.renameSync(p + '.tmp', p);
 }
@@ -125,12 +134,13 @@ export function setAutoMerge(enabled, by) {
 // Read fresh from disk and written back in the same synchronous step, so the automatic merger and
 // the dashboard (same process) can never overwrite each other's record. This is what prevents
 // the same points being moved twice, so it lives on the persistent volume.
-const movedPath = path.join(config.dataDir, 'moved-points.json');
+const movedFile = () => file('moved-points.json');
 
 function readMoved() {
-  try { return JSON.parse(fs.readFileSync(movedPath, 'utf8')); } catch { return {}; }
+  try { return JSON.parse(fs.readFileSync(movedFile(), 'utf8')); } catch { return {}; }
 }
 function writeMoved(moved) {
+  const movedPath = movedFile();
   fs.writeFileSync(movedPath + '.tmp', JSON.stringify(moved));
   fs.renameSync(movedPath + '.tmp', movedPath);
 }

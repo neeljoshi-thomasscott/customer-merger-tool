@@ -4,12 +4,13 @@
 //   npm run backfill -- --limit=20         -> merge the first 20 LOW-risk pairs (needs DRY_RUN=false)
 //   npm run backfill                       -> merge all LOW-risk pairs
 //   npm run backfill -- --include-medium   -> also merge MEDIUM-risk pairs
+//   With several brands, add --brand=<id> (e.g. npm run backfill:dry -- --brand=newbrand).
 //
 // HIGH-risk pairs are never merged from here: review them one by one in the dashboard.
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from './config.js';
+import { config, brands, brandsFromArgs, withBrand } from './config.js';
 import { fetchAllCustomers, buildPlan, checkPairs, mergePair } from './mergeService.js';
 import { loadJson } from './store.js';
 
@@ -18,7 +19,15 @@ const limitArg = process.argv.find((a) => a.startsWith('--limit='));
 const limit = limitArg ? Number(limitArg.split('=')[1]) : Infinity;
 
 async function main() {
-  console.log(`Cleanup ${config.dryRun ? 'DRY RUN (nothing will change)' : 'LIVE'}` +
+  if (brands.length > 1 && !process.argv.some((a) => a.startsWith('--brand='))) {
+    throw new Error(`Choose the brand to clean up with --brand=<id>. Brands: ${brands.map((b) => b.id).join(', ')}`);
+  }
+  const [brand] = brandsFromArgs();
+  await withBrand(brand, cleanup);
+}
+
+async function cleanup() {
+  console.log(`${config.shop}: cleanup ${config.dryRun ? 'DRY RUN (nothing will change)' : 'LIVE'}` +
     `${includeMedium ? ', low + medium risk' : ', low risk only'}${Number.isFinite(limit) ? `, limit ${limit}` : ''}`);
 
   const customers = await fetchAllCustomers((n) => process.stdout.write(`\r  loaded ${n} customers`));

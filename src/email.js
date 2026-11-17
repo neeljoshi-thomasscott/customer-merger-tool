@@ -1,14 +1,21 @@
 // Placeholder emails. Accounts created with only a mobile number get a made-up address such as
-// 3725de03e137a62f604cca5d3af7178f@thomasscott.in. When such an account is kept in a merge and the
+// 3725de03e137a62f604cca5d3af7178f@thomasscott.in (TEMP_EMAIL_PATTERN, per brand). When such an account is kept in a merge and the
 // duplicate has a real email, the real email replaces the placeholder (after the merge, so the older
 // account keeps its ID, Flits points and phone login).
 
 import { config } from './config.js';
 import { gql, customerGid, sleep, appendCustomerNote } from './shopify.js';
 
-const pattern = new RegExp(config.tempEmailPattern, 'i');
+// The current brand's pattern; a brand without one has no temporary emails.
+const compiled = new Map();
+function pattern() {
+  const source = config.tempEmailPattern;
+  if (!source) return null;
+  if (!compiled.has(source)) compiled.set(source, new RegExp(source, 'i'));
+  return compiled.get(source);
+}
 
-export const isTempEmail = (email) => Boolean(email) && pattern.test(String(email).trim());
+export const isTempEmail = (email) => Boolean(email) && Boolean(pattern()?.test(String(email).trim()));
 export const isRealEmail = (email) => Boolean(email) && !isTempEmail(email);
 
 const Q_EMAIL = `query Email($id: ID!) { customer(id: $id) { defaultEmailAddress { emailAddress } } }`;

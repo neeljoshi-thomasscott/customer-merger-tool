@@ -5,12 +5,15 @@
 //   - low and medium risk pairs can be merged in bulk
 //   - high risk pairs only one at a time, with confirmHighRisk: true
 //   - blocked pairs can't be merged from the dashboard
+//
+// With several brands, the page sends the chosen brand in an X-Brand header and every request runs for
+// that brand only: its store, its keys, its scan list and its records.
 
 import http from 'node:http';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { config } from './config.js';
+import { config, brands, findBrand, brandByShop, withBrand, currentBrand } from './config.js';
 import { fetchAllCustomers, buildPlan, checkPairs, mergePair } from './mergeService.js';
 import { readHistory, loadJson, saveJson, getAutoMerge, setAutoMerge, loadState } from './store.js';
 import { runStatus, hooks } from './status.js';
@@ -32,7 +35,7 @@ function autoStatus() {
       sinceOn: auto.at ? merges.filter((h) => Date.parse(h.at) >= Date.parse(auto.at)).length : 0,
       lastAt: merges[0]?.at || null,
     },
-    run: runStatus,
+    run: runStatus(),
     minOrderAgeMinutes: config.minOrderAgeMinutes,
     pollIntervalMinutes: config.pollIntervalMinutes,
     daily: dailyTime ? (() => {
@@ -73,14 +76,20 @@ function authUser(req) {
   return crypto.timingSafeEqual(given, user.hash) ? user.name : null;
 }
 
-// ---------- In-memory state ----------
-let plan = loadJson('plan-latest.json', null); // { scannedAt, scannedBy, pairs }
-let task = null; // the one running (or last finished) scan / merge job
+// ---------- In-memory state, per brand ----------
+// plan: the last scan { scannedAt, scannedBy, pairs }; task: the one running (or last finished) scan / merge job.
+const brandStates = new Map();
+function bs() {
+  const { id } = currentBrand();
+  if (!brandStates.has(id)) brandStates.set(id, { plan: loadJson('plan-latest.json', null), task: null });
+  return brandStates.get(id);
+}
 
-function savePlan() { if (plan) saveJson('plan-latest.json', plan); }
+function savePlan() { const { plan } = bs(); if (plan) saveJson('plan-latest.json', plan); }
 
 function startTask(type, by, total, run) {
-  task = { id: crypto.randomUUID(), type, by, status: 'running', phase: '', done: 0, total, results: [], error: '', startedAt: new Date().toISOString() };
+  const st = bs();
+  const task = st.task = { id: crypto.randomUUID(), type, by, status: 'running', phase: '', done: 0, total, results: [], error: '', startedAt: new Date().toISOString() };
   const t = task;
   run(t).then(() => { t.status = 'done'; }).catch((err) => { t.status = 'failed'; t.error = err.message; console.error(err); })
     .finally(() => { t.finishedAt = new Date().toISOString(); });
@@ -97,7 +106,7 @@ function scan(by) {
     t.done = 0;
     t.total = pairs.length;
     await checkPairs(pairs, (d) => { t.done = d; });
-    plan = { scannedAt: new Date().toISOString(), scannedBy: by, customerCount: customers.length, pairs };
+    bs().plan = { scannedAt: new Date().toISOString(), scannedBy: by, customerCount: customers.length, pairs };
     savePlan();
   });
 }
@@ -107,6 +116,7 @@ function scan(by) {
 function merge(keys, by, emailChoice = {}, keepPick = {}) {
   return startTask('merge', by, keys.length, async (t) => {
     t.phase = config.dryRun ? 'Practice merge' : 'Merging';
+    const plan = bs().plan;
     for (const key of keys) {
       const pair = plan.pairs.find((p) => p.key === key);
       t.current = pair ? { dup: pair.dup.name || pair.dup.email, keep: pair.keep.name || pair.keep.email } : null;
@@ -175,16 +185,29 @@ function readRaw(req) {
 // Shopify's "order created" webhook: no dashboard login, but it must carry Shopify's signature.
 async function orderWebhook(req, res) {
   const raw = await readRaw(req);
-  if (!validSignature(raw, req.headers['x-shopify-hmac-sha256'])) {
-    console.warn(`webhook: rejected a request without a valid Shopify signature from ${clientIp(req)} (${describeRequest(req, raw)})`);
+  // The shop header only picks the brand: that brand's secret must still match the signature.
+  const brand = brandByShop(req.headers['x-shopify-shop-domain']);
+  if (!brand || !withBrand(brand, () => validSignature(raw, req.headers['x-shopify-hmac-sha256']))) {
+    console.warn(`webhook: rejected a request without a valid Shopify signature from ${clientIp(req)} (${describeRequest(req, raw, brand)})`);
     return send(res, 401, { error: 'Invalid signature' });
   }
   send(res, 200, { ok: true }); // answer at once; Shopify retries if it waits more than 5 seconds
+  withBrand(brand, () => orderReceived(raw));
+}
+
+/** Queues a signed order for the brand whose store sent it. */
+function orderReceived(raw) {
   let order;
   try { order = JSON.parse(raw.toString('utf8')); } catch { return console.warn('webhook: body is not JSON'); }
   if (!order.admin_graphql_api_id) return;
   if (!hooks.onOrderCreated) return console.warn(`webhook: ${order.name} received but the merger isn't running here`);
   hooks.onOrderCreated({ id: order.admin_graphql_api_id, name: order.name || `order ${order.id}`, createdAt: order.created_at });
+}
+
+/** The brand chosen in the dashboard (X-Brand header); the first brand when none is sent. */
+function requestBrand(req) {
+  const asked = req.headers['x-brand'];
+  return asked ? findBrand(asked) : brands[0];
 }
 
 function readBody(req) {
@@ -202,8 +225,6 @@ function readBody(req) {
     });
   });
 }
-
-const shopHandle = config.shop.replace('.myshopify.com', '');
 
 // ---------- Too many wrong passwords: lock that address for 15 minutes ----------
 const failures = new Map(); // ip -> { count, until }
@@ -244,18 +265,35 @@ async function handle(req, res) {
     return send(res, 403, { error: 'Missing dashboard header' });
   }
 
-  switch (route) {
-    case 'GET /':
-      return send(res, 200, fs.readFileSync(HTML_PATH, 'utf8'), 'text/html; charset=utf-8');
+  if (route === 'GET /') return send(res, 200, fs.readFileSync(HTML_PATH, 'utf8'), 'text/html; charset=utf-8');
 
+  const brand = requestBrand(req);
+  if (!brand) return send(res, 400, { error: 'Unknown brand. Reload the page and choose a brand again.' });
+  return withBrand(brand, () => brandRoute(req, res, route, user, url));
+}
+
+// Tells which email domain a temporary email pattern stands for, e.g. "thomasscott.in", for the screen.
+function tempEmailDomain(pattern) {
+  const m = /@((?:[a-z0-9-]|\\\.)+)\$?$/i.exec(pattern || '');
+  return m ? m[1].replace(/\\\./g, '.') : '';
+}
+
+async function brandRoute(req, res, route, user, url) {
+  const brand = currentBrand();
+  let { plan, task } = bs();
+  switch (route) {
     case 'GET /api/meta':
       return send(res, 200, {
         user,
+        brand: brand.id,
+        brandName: brand.name,
+        brands: brands.map((b) => ({ id: b.id, name: b.name, dryRun: b.dryRun })),
         shop: config.shop,
-        adminBase: `https://admin.shopify.com/store/${shopHandle}`,
+        adminBase: brand.adminBase,
         dryRun: config.dryRun,
         flitsEnabled: config.flits.enabled,
         tempEmailPattern: config.tempEmailPattern,
+        tempEmailDomain: tempEmailDomain(config.tempEmailPattern),
         autoMerge: autoStatus(),
         lookbackHours: config.lookbackHours,
         autoMergeOnlyPhones: config.autoMergeOnlyPhones,
@@ -352,5 +390,6 @@ http.createServer((req, res) => {
   });
 }).listen(config.dashboard.port, config.dashboard.host, () => {
   hooks.serverReady = true;
-  console.log(`Dashboard: http://${config.dashboard.host}:${config.dashboard.port}  (${config.dryRun ? 'practice mode, DRY_RUN=true' : 'LIVE'})`);
+  const modes = brands.map((b) => `${b.name}: ${b.dryRun ? 'practice mode, DRY_RUN=true' : 'LIVE'}`).join('; ');
+  console.log(`Dashboard: http://${config.dashboard.host}:${config.dashboard.port}  (${modes})`);
 });

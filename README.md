@@ -59,6 +59,36 @@ automatically; orders placed earlier, or while it was off, are never merged auto
 up in the dashboard after a scan, for the team to review. Stage 2 (points after delivery) keeps running either way,
 for merges that already happened.
 
+## Several brands (Thomas Scott and Dockers)
+
+One deployment serves every brand. The dashboard has a **brand dropdown** next to the title. Each brand has its
+own Shopify store, Flits keys, practice/live mode, automatic merge switch, scan list, merge history and points
+records. The brands share only the team's logins and the timing settings (`MIN_ORDER_AGE_MINUTES`,
+`DAILY_CHECK_TIME`, ...).
+
+- **Main brand (Thomas Scott)** uses the plain variables (`SHOPIFY_SHOP`, `FLITS_READ_API_KEY`, `DRY_RUN`, ...)
+  and keeps its records at the top of the Volume, so an existing deployment keeps working unchanged. Set
+  `BRAND_ID=thomasscott` and `BRAND_NAME=Thomas Scott` for the dropdown.
+- **More brands** are listed in `EXTRA_BRANDS` and use the same variable names with their ID in front. For Dockers:
+
+  | Variable | Value |
+  |---|---|
+  | `EXTRA_BRANDS` | `dockers` |
+  | `DOCKERS_BRAND_NAME` | `Dockers` |
+  | `DOCKERS_SHOPIFY_SHOP` | Dockers' `….myshopify.com` address |
+  | `DOCKERS_SHOPIFY_CLIENT_ID`, `DOCKERS_SHOPIFY_CLIENT_SECRET` | From an app installed on the Dockers store (see Setup) |
+  | `DOCKERS_DRY_RUN` | `true` until the Dockers results are reviewed (the default) |
+  | `DOCKERS_TEMP_EMAIL_PATTERN` | Dockers' made-up email format, e.g. `^[0-9a-f]{32}@dockers\.in$`. Empty: no temporary emails |
+  | `DOCKERS_FLITS_ENABLED`, `DOCKERS_FLITS_READ_API_KEY`, `DOCKERS_FLITS_ADD_API_KEY`, `DOCKERS_FLITS_ADD_POINTS_ACTION_ID` | Dockers' Flits keys and action ID, from Flits support |
+
+  Nothing falls back to Thomas Scott's values, so a missing setting can never send a Dockers merge or points
+  to the Thomas Scott store or Flits account. Dockers' records live in `/data/brands/dockers`.
+
+Each brand's store sends new orders to the same webhook address. The tool tells the stores apart by their shop
+domain and checks each signature with that brand's secret. Log lines start with the brand's name. The
+command-line tools take `--brand=<id>` (for example `npm run backfill:dry -- --brand=dockers`), and the cleanup
+script requires it when there are several brands.
+
 ## Deploy on Railway
 
 On Railway, the automatic merger and the dashboard run together as **one service** with **one Volume**.

@@ -1,6 +1,7 @@
 // Shopify "order created" webhook. On startup the tool subscribes itself (once) to ORDERS_CREATE,
 // pointing at <PUBLIC_URL>/webhooks/orders-create. Shopify signs every webhook with the app's
-// client secret; anything without a valid signature is rejected.
+// client secret; anything without a valid signature is rejected. Every brand's store uses the same
+// address: the shop domain Shopify sends picks the brand, whose secret must then match the signature.
 
 import crypto from 'node:crypto';
 import { config } from './config.js';
@@ -27,7 +28,7 @@ export function validSignature(rawBody, header) {
   if (!header) return false;
   const given = Buffer.from(String(header), 'base64');
   // SHOPIFY_WEBHOOK_SECRET only if Shopify signs with a different secret than the client secret.
-  const secrets = [...new Set([process.env.SHOPIFY_WEBHOOK_SECRET, config.clientSecret, config.clientSecret.trim()]
+  const secrets = [...new Set([config.webhookSecret, config.clientSecret, config.clientSecret.trim()]
     .filter(Boolean))];
   return secrets.some((secret) => {
     const expected = crypto.createHmac('sha256', secret).update(rawBody).digest();
@@ -36,17 +37,18 @@ export function validSignature(rawBody, header) {
 }
 
 /** What a rejected request looked like (no secrets), to find out why a signature didn't match. */
-export function describeRequest(req, rawBody) {
+export function describeRequest(req, rawBody, brand) {
   const h = req.headers;
+  const secret = brand?.clientSecret ?? '';
   return `topic ${h['x-shopify-topic'] || '-'}, shop ${h['x-shopify-shop-domain'] || '-'}, `
     + `api ${h['x-shopify-api-version'] || '-'}, signature ${h['x-shopify-hmac-sha256'] ? `${String(h['x-shopify-hmac-sha256']).length} chars` : 'missing'}, `
     + `body ${rawBody.length} bytes, encoding ${h['content-encoding'] || 'none'}, `
-    + `secret ${config.clientSecret.length} chars${config.clientSecret !== config.clientSecret.trim() ? ' (has spaces)' : ''}`;
+    + (brand ? `brand ${brand.name}, secret ${secret.length} chars${secret !== secret.trim() ? ' (has spaces)' : ''}` : 'no brand uses this shop');
 }
 
 /** Makes sure Shopify sends new orders to this tool. Safe to run on every start. */
 export async function registerOrderWebhook() {
-  const wh = runStatus.webhook;
+  const wh = runStatus().webhook;
   if (!config.clientSecret) {
     wh.error = 'Webhooks need SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET (to check Shopify\'s signature).';
   } else if (!config.publicUrl) {

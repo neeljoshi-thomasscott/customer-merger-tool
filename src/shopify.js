@@ -4,13 +4,13 @@ export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ---------- Auth ----------
 // Either a static Admin API token (older custom apps), or a Dev Dashboard app's
-// client ID + secret exchanged for a 24-hour token (client credentials grant).
-let token = config.accessToken || null;
-let tokenExpiresAt = config.accessToken ? Number.POSITIVE_INFINITY : 0;
+// client ID + secret exchanged for a 24-hour token (client credentials grant). One token per store.
+const tokens = new Map(); // shop -> { token, expiresAt }
 
 async function getToken(force = false) {
-  if (!config.clientId) return token;
-  if (!force && token && Date.now() < tokenExpiresAt - 5 * 60 * 1000) return token;
+  if (!config.clientId) return config.accessToken;
+  const cached = tokens.get(config.shop);
+  if (!force && cached && Date.now() < cached.expiresAt - 5 * 60 * 1000) return cached.token;
 
   const res = await fetch(`https://${config.shop}/admin/oauth/access_token`, {
     method: 'POST',
@@ -23,9 +23,11 @@ async function getToken(force = false) {
   });
   if (!res.ok) throw new Error(`Token request failed: ${res.status} ${(await res.text()).slice(0, 300)}`);
   const json = await res.json();
-  token = json.access_token;
-  tokenExpiresAt = Date.now() + (json.expires_in ? json.expires_in * 1000 : 23 * 3600 * 1000);
-  return token;
+  tokens.set(config.shop, {
+    token: json.access_token,
+    expiresAt: Date.now() + (json.expires_in ? json.expires_in * 1000 : 23 * 3600 * 1000),
+  });
+  return json.access_token;
 }
 
 // ---------- GraphQL with retries ----------

@@ -5,9 +5,12 @@
 //   - the daily safety check at DAILY_CHECK_TIME (11:00 am India time)
 // Flits points for merged orders are checked every POLL_INTERVAL_MINUTES, only while an order waits.
 //
-//   node src/run.js --once   one catch-up scan + points check, then exit (no webhook)
+// Each brand runs its own merger: its own queue, webhook subscription, daily check and points check.
+//
+//   node src/run.js --once                 one catch-up scan + points check per brand, then exit (no webhook)
+//   node src/run.js --once --brand=<id>    the same for one brand
 
-import { config } from './config.js';
+import { config, withBrand, currentBrand, brandsFromArgs } from './config.js';
 import { iterateOrders, numericId } from './shopify.js';
 import { processOrder } from './processOrder.js';
 import { processPendingPoints } from './points.js';
@@ -22,9 +25,14 @@ const MINUTE = 60 * 1000;
 // answer can change later (for example the phone is added to the customer after the order).
 const RECHECK_DAILY = new Set(['no phone number on order', 'no existing customer with this phone']);
 
-// Everything that reads or writes the state file runs one at a time.
-let chain = Promise.resolve();
-const serial = (label, fn) => (chain = chain.then(fn).catch((err) => console.error(`${label} failed: ${err.message}`)));
+// Everything that reads or writes a brand's state file runs one at a time (one queue per brand).
+const chains = new Map();
+function serial(label, fn) {
+  const { id } = currentBrand();
+  const next = (chains.get(id) || Promise.resolve()).then(fn).catch((err) => console.error(`${label} failed: ${err.message}`));
+  chains.set(id, next);
+  return next;
+}
 
 const stamp = () => `[${new Date().toISOString()}] ${config.dryRun ? 'DRY RUN' : 'LIVE'}`;
 
@@ -32,7 +40,7 @@ const stamp = () => `[${new Date().toISOString()}] ${config.dryRun ? 'DRY RUN' :
 async function handleOrder(state, order, source) {
   try {
     const r = await processOrder(order);
-    runStatus.last = { at: new Date().toISOString(), order: order.name, status: r.status, details: r.details };
+    runStatus().last = { at: new Date().toISOString(), order: order.name, status: r.status, details: r.details };
     if (r.status !== 'skipped') {
       console.log(`  ${order.name}: ${r.status} | phone ${r.phone} | duplicate ${r.newId} -> old ${r.keepId} | ${r.details}`);
       logAction(order, r);
@@ -58,7 +66,7 @@ async function handleOrder(state, order, source) {
   } catch (err) {
     console.error(`  ${order.name}: ERROR ${err.message}`);
     logAttention(order, { attention: `Error, will retry in the daily safety check: ${err.message}` });
-    runStatus.last = { at: new Date().toISOString(), order: order.name, status: 'error', details: err.message };
+    runStatus().last = { at: new Date().toISOString(), order: order.name, status: 'error', details: err.message };
     return 'error';
   }
 }
@@ -71,7 +79,7 @@ function placedWhileOn(createdAt) {
 
 // ---------- Webhook: one new order ----------
 function onOrderCreated({ id, name, createdAt }) {
-  const wh = runStatus.webhook;
+  const wh = runStatus().webhook;
   wh.received++;
   wh.lastAt = new Date().toISOString();
   wh.lastOrder = name;
@@ -81,10 +89,10 @@ function onOrderCreated({ id, name, createdAt }) {
   }
   const dueAt = Date.parse(createdAt || wh.lastAt) + config.minOrderAgeMinutes * MINUTE;
   const wait = Math.max(0, dueAt - Date.now());
-  runStatus.waiting[name] = new Date(Date.now() + wait).toISOString();
+  runStatus().waiting[name] = new Date(Date.now() + wait).toISOString();
   console.log(`${stamp()} webhook: ${name} received, checking it in ${Math.round(wait / MINUTE)} min`);
   setTimeout(() => serial(`order ${name}`, async () => {
-    delete runStatus.waiting[name];
+    delete runStatus().waiting[name];
     const state = loadState();
     if (state.processed[id]) return;
     let order = null;
@@ -92,7 +100,7 @@ function onOrderCreated({ id, name, createdAt }) {
     if (!order) { console.warn(`  ${name}: not found in Shopify, left for the daily safety check`); return; }
     if (!placedWhileOn(order.createdAt)) { console.log(`  ${name}: automatic merging is OFF, skipped`); return; }
     const result = await handleOrder(state, order, 'new order');
-    console.log(`${stamp()} ${name}: ${result === 'skipped' ? `no action (${runStatus.last?.details})` : result}`);
+    console.log(`${stamp()} ${name}: ${result === 'skipped' ? `no action (${runStatus().last?.details})` : result}`);
   }), wait);
 }
 
@@ -129,7 +137,7 @@ async function dailyIfDue() {
   const counts = await scan(true);
   if (!counts || !getAutoMerge().enabled) return;
   markDailyCheck(at);
-  runStatus.lastDailyCheck = { at: at.toISOString(), ...counts };
+  runStatus().lastDailyCheck = { at: at.toISOString(), ...counts };
   console.log(`  next daily safety check ${dailyTimeLabel()} India time (${nextDailyCheckAt()})`);
 }
 
@@ -142,17 +150,10 @@ async function points() {
   console.log(`${stamp()} points: waiting for delivery ${pts.waiting}, moved ${pts.moved}, closed ${pts.closed}, errors ${pts.errors}`);
 }
 
-async function main() {
-  if (process.argv.includes('--once')) {
-    await scan(false);
-    await points();
-    return;
-  }
-  runStatus.startedAt = new Date().toISOString();
-  hooks.onOrderCreated = onOrderCreated;
-  // The webhook is served by the dashboard's server (src/main.js runs both); alone, rely on the scans.
-  for (let i = 0; i < 20 && !hooks.serverReady; i++) await new Promise((r) => setTimeout(r, 250));
-  if (hooks.serverReady) await registerOrderWebhook();
+/** Starts the merger for the current brand. */
+async function startBrand(serverReady) {
+  runStatus().startedAt = new Date().toISOString();
+  if (serverReady) await registerOrderWebhook();
   else console.warn('webhook: dashboard server not running in this process, so new orders are only found by the daily safety check');
   console.log(`${stamp()} automatic merging is ${getAutoMerge().enabled ? 'ON' : 'OFF'}; `
     + `next daily safety check ${dailyTimeLabel() || 'off'} (${nextDailyCheckAt() || '-'})`);
@@ -162,6 +163,24 @@ async function main() {
   setInterval(() => serial('daily check', dailyIfDue), MINUTE);
   setInterval(() => serial('points', points), config.pollIntervalMinutes * MINUTE);
   serial('points', points);
+}
+
+async function main() {
+  const brands = brandsFromArgs();
+  if (process.argv.includes('--once')) {
+    for (const brand of brands) {
+      await withBrand(brand, async () => {
+        await scan(false);
+        await points();
+      });
+    }
+    return;
+  }
+  // Called by the dashboard's webhook route inside the brand of the shop that sent the order.
+  hooks.onOrderCreated = onOrderCreated;
+  // The webhook is served by the dashboard's server (src/main.js runs both); alone, rely on the scans.
+  for (let i = 0; i < 20 && !hooks.serverReady; i++) await new Promise((r) => setTimeout(r, 250));
+  for (const brand of brands) await withBrand(brand, () => startBrand(hooks.serverReady));
 }
 
 main().catch((err) => {

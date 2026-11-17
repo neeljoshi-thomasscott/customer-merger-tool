@@ -65,6 +65,8 @@ a { color: var(--accent); }
 header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 20px; }
 h1 { font-size: 28px; line-height: 1.2; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
 .sub { color: var(--muted); font-size: 14px; margin-top: 4px; }
+.title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.brandpick { font-size: 15px; font-weight: 600; min-width: 0; }
 .btn {
   border: 1px solid var(--line); background: var(--surface); border-radius: 8px;
   padding: 8px 14px; cursor: pointer; font-weight: 500; white-space: nowrap;
@@ -236,7 +238,10 @@ dialog::backdrop { background: rgba(10, 14, 25, .45); }
 <div class="wrap">
   <header>
     <div>
-      <h1>Duplicate customers</h1>
+      <div class="title-row">
+        <h1>Duplicate customers</h1>
+        <select class="pickbox brandpick" id="brandPick" aria-label="Brand" hidden></select>
+      </div>
       <div class="sub" id="sub">Loading…</div>
     </div>
     <button class="btn primary" id="scanBtn" type="button">Scan store</button>
@@ -333,9 +338,25 @@ const first = (s) => String(s || '').trim().toLowerCase().split(/\s+/)[0] || '';
 const norm = (s) => String(s || '').trim().toLowerCase();
 const adminUrl = (id) => `${S.meta.adminBase}/customers/${encodeURIComponent(id)}`;
 
+// ---------- Brand ----------
+// The brand comes from ?brand= in the address (so each tab or bookmark stays on one brand), else the
+// last brand chosen on this computer. Every request sends it; the server works on that brand only.
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* private window */ } },
+  remove(k) { try { localStorage.removeItem(k); } catch { /* private window */ } },
+};
+const BRAND = new URLSearchParams(location.search).get('brand') || store.get('brand') || '';
+
+$('brandPick').addEventListener('change', (e) => {
+  store.set('brand', e.target.value);
+  location.search = `?brand=${encodeURIComponent(e.target.value)}`; // reload: nothing from the other brand stays on screen
+});
+
 async function api(path, body) {
-  const opts = body === undefined ? {} : {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-By': 'dashboard' }, body: JSON.stringify(body),
+  const headers = BRAND ? { 'X-Brand': BRAND } : {};
+  const opts = body === undefined ? { headers } : {
+    method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', 'X-Requested-By': 'dashboard' }, body: JSON.stringify(body),
   };
   const res = await fetch(path, opts);
   const json = await res.json().catch(() => ({}));
@@ -345,7 +366,18 @@ async function api(path, body) {
 
 // ---------- Load ----------
 async function init() {
-  S.meta = await api('/api/meta');
+  try {
+    S.meta = await api('/api/meta');
+  } catch (err) {
+    if (BRAND && /Unknown brand/.test(err.message)) { store.remove('brand'); location.replace(location.pathname); return; }
+    throw err;
+  }
+  store.set('brand', S.meta.brand);
+  if (S.meta.brands.length > 1) {
+    $('brandPick').innerHTML = S.meta.brands.map((b) => `<option value="${esc(b.id)}"${b.id === S.meta.brand ? ' selected' : ''}>${esc(b.name)}${b.dryRun ? ' (practice)' : ''}</option>`).join('');
+    $('brandPick').hidden = false;
+    document.title = `${S.meta.brandName}: duplicate customers`;
+  }
   $('practice').hidden = !S.meta.dryRun;
   renderAuto();
   await loadPlan();
@@ -698,7 +730,8 @@ $('dlg').addEventListener('click', (e) => {
 });
 
 // ---------- Temporary emails ----------
-// Accounts created with only a mobile number get a made-up email (32 letters/digits @thomasscott.in).
+// Accounts created with only a mobile number get a made-up email (e.g. 32 letters/digits @thomasscott.in,
+// set per brand by TEMP_EMAIL_PATTERN).
 // When the kept account has one and the duplicate has a real email, the team chooses which email stays.
 const isTemp = (e) => Boolean(e) && new RegExp(S.meta.tempEmailPattern || '$^', 'i').test(String(e).trim());
 
@@ -719,7 +752,7 @@ function emailChoiceHtml(pairs) {
   if (!groups.length) return '';
   if (groups.length > 3) {
     return `<div class="emailpick"><label class="confirm"><input type="checkbox" id="useReal" checked>
-      <span>${groups.length} kept accounts have a temporary email (…@thomasscott.in). Replace it with the duplicate's real email.</span></label></div>`;
+      <span>${groups.length} kept accounts have a temporary email${S.meta.tempEmailDomain ? ` (…@${esc(S.meta.tempEmailDomain)})` : ''}. Replace it with the duplicate's real email.</span></label></div>`;
   }
   return groups.map((g) => `<div class="emailpick">
     <p><strong>Email for ${esc(g.keep.name || 'the kept account')}</strong> (its email is temporary):</p>
@@ -789,7 +822,7 @@ function confirmMerge(pairs) {
     ${S.meta.flitsEnabled && pts ? `${fmtPts(pts)} Flits points will be added to the kept accounts.` : ''}</p>
     ${one ? keepChoiceHtml(one) : ''}
     <div id="emailBox">${emailChoiceHtml(pairs)}</div>
-    <p>Shopify can't undo a merge. Each pair is checked again with Shopify just before it's merged.</p>
+    <p>${S.meta.brands.length > 1 ? `Brand: <strong>${esc(S.meta.brandName)}</strong> (${esc(S.meta.shop)}). ` : ''}Shopify can't undo a merge. Each pair is checked again with Shopify just before it's merged.</p>
     ${S.meta.dryRun ? '<p><strong>Practice mode:</strong> nothing will actually change.</p>' : ''}
     <div class="dlg-actions">
       <button class="btn" type="button" data-close>Cancel</button>
