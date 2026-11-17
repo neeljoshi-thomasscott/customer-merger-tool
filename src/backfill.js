@@ -6,7 +6,8 @@
 //   npm run backfill -- --include-medium   -> also merge MEDIUM-risk pairs
 //   With several brands, add --brand=<id> (e.g. npm run backfill:dry -- --brand=newbrand).
 //
-// HIGH-risk pairs are never merged from here: review them one by one in the dashboard.
+// HIGH-risk pairs are never merged from here: review them one by one in the dashboard. Neither are old
+// accounts without a mobile number (matched on name, pincode and email): those are reviewed in the dashboard.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -60,6 +61,7 @@ async function cleanup() {
     };
 
     if (pair.risk === 'blocked') { out(`blocked: ${pair.check?.reason}`); continue; }
+    if (pair.type === 'no-phone') { out('skipped: old account without a mobile number, review in dashboard'); continue; }
     if (!allowed.has(pair.risk)) { out(`skipped: ${pair.risk} risk, review in dashboard`); continue; }
     if (attempted >= limit) { out('not run: limit reached'); continue; }
     attempted++;

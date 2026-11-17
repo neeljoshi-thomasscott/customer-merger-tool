@@ -7,7 +7,7 @@ import { normalizePhone } from './phone.js';
 import * as flits from './flits.js';
 import { recordHistory, logAttention, getMovedPoints, addMovedPoints } from './store.js';
 import { noteMerge } from './annotate.js';
-import { replaceTempEmail } from './email.js';
+import { replaceTempEmail, isTempEmail } from './email.js';
 
 const cc = config.countryCode;
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -24,7 +24,7 @@ query AllCustomers($after: String) {
       id createdAt firstName lastName numberOfOrders
       defaultPhoneNumber { phoneNumber }
       defaultEmailAddress { emailAddress }
-      addresses(first: 5) { phone firstName lastName city }
+      addresses(first: 5) { phone firstName lastName city zip }
     }
   }
 }`;
@@ -67,6 +67,7 @@ function summary(c, address) {
     orders: Number(c.numberOfOrders || 0),
     createdAt: c.createdAt,
     city: address?.city || c.addresses?.find((a) => a.city)?.city || '',
+    zip: address?.zip || c.addresses?.find((a) => a.zip)?.zip || '',
   };
 }
 
@@ -157,7 +158,115 @@ export function buildPlan(customers, dismissed = {}) {
     }
   }
 
+  pairs.push(...noPhonePairs(customers, owners, dismissed));
+
   pairs.sort((a, b) => RANK[a.risk] - RANK[b.risk] || a.phone.localeCompare(b.phone));
+  return pairs;
+}
+
+// ---------- Old accounts with no mobile number ----------
+// Before mobile-number login, customers checked out with Shopify's email login, so the same person can
+// have an old account with no phone at all and a newer account that logs in with their mobile number.
+// No phone links them, so these are matched on name, pincode and email, and are never low risk.
+
+const GENERIC_EMAILS = new Set(['contact', 'support', 'orders', 'order', 'customer', 'customers', 'sales', 'admin',
+  'hello', 'info', 'test', 'testing', 'noreply', 'donotreply', 'account', 'accounts', 'office', 'shopping', 'mail']);
+
+/** "Neel  Joshi" -> "neel joshi". Needs a first and a last name: one name alone matches too many people. */
+function fullNameKey(c) {
+  const a = c.addresses?.find((x) => x.firstName || x.lastName);
+  const f = clean(c.firstName || a?.firstName);
+  const l = clean(c.lastName || a?.lastName);
+  return f && l ? `${f} ${l}` : '';
+}
+
+/** neel.joshi@thomasscott.in and neeljoshi12@gmail.com -> "neeljoshi". Temporary and generic emails give none. */
+function emailKey(c) {
+  const email = c.defaultEmailAddress?.emailAddress || '';
+  if (!email || isTempEmail(email)) return '';
+  const key = email.toLowerCase().split('@')[0].split('+')[0].replace(/[^a-z]/g, '');
+  return key.length >= 6 && !GENERIC_EMAILS.has(key) ? key : '';
+}
+
+const pinOf = (a) => String(a?.zip || '').replace(/\s+/g, '');
+const pins = (c) => new Set((c.addresses || []).map(pinOf).filter((z) => z.length >= 5));
+const cities = (c) => new Set((c.addresses || []).map((a) => clean(a.city)).filter(Boolean));
+const hasAnyPhone = (c) => Boolean(normalizePhone(c.defaultPhoneNumber?.phoneNumber, cc))
+  || (c.addresses || []).some((a) => normalizePhone(a.phone, cc));
+
+function index(list, keyOf) {
+  const map = new Map();
+  for (const c of list) {
+    const k = keyOf(c);
+    if (!k) continue;
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(c);
+  }
+  return map;
+}
+
+/** What links an old account without a phone to an account with a login phone. */
+function evidence(old, kept) {
+  const oldPins = pins(old);
+  const pin = [...pins(kept)].find((p) => oldPins.has(p)) || '';
+  const oldCities = cities(old);
+  const sameName = Boolean(fullNameKey(old)) && fullNameKey(old) === fullNameKey(kept);
+  const sameEmail = Boolean(emailKey(old)) && emailKey(old) === emailKey(kept);
+  const sameCity = [...cities(kept)].some((x) => oldCities.has(x));
+  const strong = sameName && (Boolean(pin) || sameEmail);
+  // Name and city, or a similar email, is suggested for review. A name alone is not suggested.
+  const shown = strong || (sameName && sameCity) || sameEmail;
+  const score = (sameName ? 4 : 0) + (pin ? 3 : 0) + (sameEmail ? 3 : 0) + (sameCity ? 1 : 0);
+  return { sameName, sameEmail, pin, sameCity, strong, shown, score };
+}
+
+export function assessNoPhone({ dup, keep, ev, others }) {
+  const reasons = [{ level: 'medium', text: 'No mobile number on the old account' }];
+  if (ev.sameName) reasons.push({ level: 'low', text: 'Same full name' });
+  else if (firstWord(dup.firstName) && firstWord(keep.firstName) && firstWord(dup.firstName) !== firstWord(keep.firstName)) {
+    reasons.push({ level: 'high', text: 'First names differ' });
+  } else reasons.push({ level: 'high', text: 'Name missing or different' });
+  if (ev.pin) reasons.push({ level: 'low', text: `Same pincode ${ev.pin}` });
+  if (ev.sameEmail) reasons.push({ level: 'low', text: 'Similar email' });
+  if (ev.sameCity && !ev.pin) reasons.push({ level: 'low', text: 'Same city' });
+  if (ev.sameName && !ev.strong) reasons.push({ level: 'high', text: 'Only name and city match' });
+  if (others > 0) reasons.push({ level: 'high', text: `Also matches ${others} other customer${others > 1 ? 's' : ''}` });
+  if (dup.orders >= 5) reasons.push({ level: 'medium', text: `Old account has ${dup.orders} orders` });
+  const level = reasons.some((r) => r.level === 'high') ? 'high' : 'medium';
+  return { level, reasons };
+}
+
+function noPhonePairs(customers, owners, dismissed) {
+  // Accounts that log in with a mobile number are the ones kept.
+  const keepers = [...owners.values()];
+  const byName = index(keepers, fullNameKey);
+  const byEmail = index(keepers, emailKey);
+  const pairs = [];
+
+  for (const c of customers) {
+    if (hasAnyPhone(c)) continue;
+    const candidates = new Set([...(byName.get(fullNameKey(c)) || []), ...(byEmail.get(emailKey(c)) || [])]);
+    const matches = [...candidates]
+      .filter((k) => k.id !== c.id)
+      .map((k) => ({ k, ev: evidence(c, k) }))
+      .filter((m) => m.ev.shown)
+      .sort((a, b) => b.ev.score - a.ev.score || Date.parse(a.k.createdAt) - Date.parse(b.k.createdAt));
+    if (!matches.length) continue;
+
+    // One suggestion per old account: the best match. Any other match makes it high risk.
+    const { k, ev } = matches[0];
+    const address = (ev.pin && c.addresses?.find((a) => pinOf(a) === ev.pin)) || c.addresses?.[0];
+    const dup = summary(c, address);
+    const keep = summary(k);
+    const key = `${dup.id}:${keep.id}`;
+    if (dismissed[key]) continue;
+    const { level, reasons } = assessNoPhone({ dup, keep, ev, others: matches.length - 1 });
+    pairs.push({
+      key, type: 'no-phone', phone: normalizePhone(k.defaultPhoneNumber?.phoneNumber, cc) || '',
+      matchedOn: [ev.sameName && 'name', ev.pin && 'pincode', ev.sameEmail && 'email', ev.sameCity && !ev.pin && 'city'].filter(Boolean),
+      risk: level, baseRisk: level, reasons, dup, keep, points: null, check: null,
+    });
+  }
   return pairs;
 }
 

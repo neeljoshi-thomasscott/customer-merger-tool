@@ -260,6 +260,7 @@ dialog::backdrop { background: rgba(10, 14, 25, .45); }
 
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" aria-selected="true" data-tab="review" id="tab-review">To review</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="nophone" id="tab-nophone">No mobile number</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="history" id="tab-history">Merged</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="dismissed" id="tab-dismissed">Not duplicates</button>
   </div>
@@ -320,7 +321,7 @@ dialog::backdrop { background: rgba(10, 14, 25, .45); }
 </div>
 
 <script>
-const S = { meta: null, plan: { pairs: [] }, filter: 'all', q: '', orders: 'all', sort: 'default', selected: new Set(), shown: 200, tab: 'review', polling: null };
+const S = { meta: null, plan: { pairs: [] }, kind: 'review', filter: 'all', q: '', orders: 'all', sort: 'default', selected: new Set(), shown: 200, tab: 'review', polling: null };
 const RISK = {
   low: { label: 'Low risk', note: 'Can be merged in bulk' },
   medium: { label: 'Medium risk', note: 'Check, then bulk merge' },
@@ -403,21 +404,39 @@ function renderHeader() {
     : `${S.meta.shop}. Not scanned yet. Signed in as ${S.meta.user}.`;
 }
 
+// ---------- Which pairs a tab shows ----------
+// "To review": accounts sharing a phone number. "No mobile number": old accounts without any phone,
+// matched to a mobile-number account on name, pincode and email.
+const isNoPhone = (p) => p.type === 'no-phone';
+const inKind = (p, kind = S.kind) => (kind === 'nophone') === isNoPhone(p);
+const kindPairs = () => S.plan.pairs.filter((p) => inKind(p));
+
+function renderTabCounts() {
+  const n = S.plan.pairs.filter(isNoPhone).length;
+  const r = S.plan.pairs.length - n;
+  $('tab-review').textContent = S.plan.scannedAt ? `To review (${r.toLocaleString('en-IN')})` : 'To review';
+  $('tab-nophone').textContent = S.plan.scannedAt ? `No mobile number (${n.toLocaleString('en-IN')})` : 'No mobile number';
+}
+
 // ---------- Risk strip ----------
 function renderStrip() {
+  renderTabCounts();
   const counts = { low: 0, medium: 0, high: 0, blocked: 0 };
   let points = 0;
-  for (const p of S.plan.pairs) { counts[p.risk]++; points += p.points || 0; }
-  const total = S.plan.pairs.length || 1;
+  const shown = kindPairs();
+  for (const p of shown) { counts[p.risk]++; points += p.points || 0; }
+  const total = shown.length || 1;
   $('strip').innerHTML = Object.keys(RISK).map((r) => `
     <button type="button" class="seg ${r}" style="--grow:${Math.max(counts[r] / total, 0.08)}" data-risk="${r}" aria-pressed="${S.filter === r}">
       <b>${counts[r].toLocaleString('en-IN')}</b>
       <span>${RISK[r].label}</span>
       <small>${RISK[r].note}</small>
     </button>`).join('');
-  const n = S.plan.pairs.length;
+  const n = shown.length;
   $('stripNote').innerHTML = !S.plan.scannedAt ? '' :
-    `${n.toLocaleString('en-IN')} duplicate account${n === 1 ? '' : 's'} found` +
+    (S.kind === 'nophone'
+      ? `${n.toLocaleString('en-IN')} old account${n === 1 ? '' : 's'} without a mobile number matched to a mobile-number account`
+      : `${n.toLocaleString('en-IN')} duplicate account${n === 1 ? '' : 's'} found`) +
     (S.meta.flitsEnabled ? `, holding ${fmtPts(points)} Flits points to move` : '') +
     (S.filter !== 'all' ? `. Showing ${RISK[S.filter].label.toLowerCase()} only. <button class="btn quiet" type="button" id="showAll">Show all</button>` : '. Select a risk level to filter.');
 }
@@ -445,6 +464,7 @@ function visiblePairs() {
     any0: (d, k) => d === 0 || k === 0,
   };
   const list = S.plan.pairs.filter((p) => {
+    if (!inKind(p)) return false;
     if (S.filter !== 'all' && p.risk !== S.filter) return false;
     if (!(ORDERS[S.orders] || ORDERS.all)(Number(p.dup.orders) || 0, Number(p.keep.orders) || 0)) return false;
     if (!q) return true;
@@ -486,7 +506,7 @@ function acctHtml(acct, other, role) {
 /** Low and medium risk duplicates that merge into the same kept account as `p`. */
 function groupOf(p) {
   if (p.risk !== 'low' && p.risk !== 'medium') return [p];
-  return S.plan.pairs.filter((q) => q.keep.id === p.keep.id && (q.risk === 'low' || q.risk === 'medium'));
+  return S.plan.pairs.filter((q) => q.keep.id === p.keep.id && (q.risk === 'low' || q.risk === 'medium') && isNoPhone(q) === isNoPhone(p));
 }
 
 function pairHtml(p) {
@@ -507,6 +527,8 @@ function pairHtml(p) {
 
   const reasons = p.risk === 'blocked'
     ? `<span class="r-blocked">${esc(p.check?.reason || 'Shopify cannot merge these automatically')}</span>`
+    : isNoPhone(p)
+    ? p.reasons.map((r) => `<span class="r-${r.level}">${esc(r.text)}</span>`).join(', ')
     : p.reasons.filter((r) => r.level !== 'low').map((r) => `<span class="r-${r.level}">${esc(r.text)}</span>`).join(', ') ||
       esc(p.reasons.map((r) => r.text).join(', '));
 
@@ -522,25 +544,29 @@ function pairHtml(p) {
     ${acctHtml(p.keep, p.dup, 'keep')}
     <div class="facts">
       <div class="ph">${esc(fmtPhone(p.phone))}</div>
+      ${isNoPhone(p) ? `<div class="meta">Kept account logs in with this phone. Matched on ${esc((p.matchedOn || []).join(', '))}</div>` : ''}
       ${S.meta.flitsEnabled ? `<div class="meta">${p.points ? `${fmtPts(p.points)} points to move` : 'No points to move'}</div>` : ''}
     </div>
     <div class="acts">${actions}</div>
-    <div class="why">${reasons}${groupOf(p).length > 1 ? `${reasons ? '. ' : ''}<span>This account has ${groupOf(p).length} duplicate accounts with this phone; Merge all merges them together.</span>` : ''}</div>
+    <div class="why">${reasons}${groupOf(p).length > 1 ? `${reasons ? '. ' : ''}<span>This account has ${groupOf(p).length} ${isNoPhone(p) ? 'old accounts matched to it' : 'duplicate accounts with this phone'}; Merge all merges them together.</span>` : ''}</div>
   </div>`;
 }
 
 function renderList() {
   if (!S.plan.scannedAt) {
-    $('list').innerHTML = `<div class="empty"><p>Scan the store to find customers who have more than one account with the same phone number.</p>
+    $('list').innerHTML = `<div class="empty"><p>${S.kind === 'nophone'
+      ? 'Scan the store to find old accounts without a mobile number that belong to a customer who now logs in with their mobile number.'
+      : 'Scan the store to find customers who have more than one account with the same phone number.'}</p>
       <button class="btn primary" type="button" data-act="scan">Scan store</button></div>`;
     return;
   }
   const pairs = visiblePairs();
   if (!pairs.length) {
-    $('list').innerHTML = `<div class="empty"><p>${S.plan.pairs.length ? 'No pairs match this filter.' : 'No duplicate accounts left to review.'}</p></div>`;
+    $('list').innerHTML = `<div class="empty"><p>${kindPairs().length ? 'No pairs match this filter.'
+      : S.kind === 'nophone' ? 'No old accounts without a mobile number match a mobile-number account.' : 'No duplicate accounts left to review.'}</p></div>`;
     return;
   }
-  const head = `<div class="cols"><span></span><span>Risk</span><span>Duplicate account</span><span></span><span>Account kept</span><span>Phone</span><span></span></div>`;
+  const head = `<div class="cols"><span></span><span>Risk</span><span>${S.kind === 'nophone' ? 'Old account (no mobile)' : 'Duplicate account'}</span><span></span><span>Account kept</span><span>Phone</span><span></span></div>`;
   const rows = pairs.slice(0, S.shown).map(pairHtml).join('');
   const more = pairs.length > S.shown
     ? `<div class="more"><button class="btn" type="button" data-act="more">Show ${Math.min(200, pairs.length - S.shown)} more of ${pairs.length - S.shown} remaining</button></div>` : '';
@@ -662,7 +688,7 @@ function startAutoTimer() {
     const ld = r.lastDailyCheck;
     if (ld) lines.push(`Last safety check ${fmtTime(ld.at)}: ${plural(ld.checked, 'order')} checked, ${ld.merged} merged${ld.errors ? `, ${plural(ld.errors, 'error')}` : ''}.`);
   }
-  lines.push(`Flits points are moved about an hour after delivery.`);
+  if (S.meta.flitsEnabled) lines.push(`Flits points are moved about an hour after delivery.`);
   $('autoLast').innerHTML = lines.map((l) => esc(l).replace(/^Not connected/, '<strong>Not connected</strong>')).join(' ');
   $('autoWaiting').textContent = Object.keys(r.waiting || {}).length;
 
@@ -782,30 +808,42 @@ function acctLine(a) {
     ${a.orders} order${a.orders === 1 ? '' : 's'}, joined ${fmtDate(a.createdAt)}${a.loginPhone ? ', logs in with this phone' : ''}</span>`;
 }
 
+// The suggested account to keep is usually the older one, but for an old account without a mobile number
+// it's the newer mobile-number account, so "older"/"newer" comes from the dates.
+const ageOf = (a, b) => ((Date.parse(a.createdAt) || 0) <= (Date.parse(b.createdAt) || 0) ? 'older' : 'newer');
+
+function keepNoteText(p, swapped) {
+  const kept = swapped ? p.dup : p.keep;
+  const gone = swapped ? p.keep : p.dup;
+  const k = ageOf(kept, gone), g = ageOf(gone, kept);
+  return swapped
+    ? `The ${g} account is merged into the ${k} one. Its orders and login phone move to the ${k} account${S.meta.flitsEnabled ? `, and its Flits points are moved to the ${k} account` : ''}.`
+    : `The ${g} account is merged into the ${k} one${S.meta.flitsEnabled ? `; its Flits points move to the ${k} account` : ''}.`;
+}
+
 function keepChoiceHtml(p) {
   return `<div class="emailpick">
     <p><strong>Account to keep</strong></p>
-    <label class="confirm"><input type="radio" name="keepPick" value="older" checked> <span>${acctLine(p.keep)} <span class="meta">(older)</span></span></label>
-    <label class="confirm"><input type="radio" name="keepPick" value="newer"> <span>${acctLine(p.dup)} <span class="meta">(newer)</span></span></label>
-    <p class="meta" id="keepNote">The newer account is merged into the older one${S.meta.flitsEnabled ? '; its Flits points move to the older account' : ''}.</p>
+    <label class="confirm"><input type="radio" name="keepPick" value="suggested" checked> <span>${acctLine(p.keep)} <span class="meta">(${ageOf(p.keep, p.dup)})</span></span></label>
+    <label class="confirm"><input type="radio" name="keepPick" value="swap"> <span>${acctLine(p.dup)} <span class="meta">(${ageOf(p.dup, p.keep)})</span></span></label>
+    <p class="meta" id="keepNote">${esc(keepNoteText(p, false))}</p>
   </div>`;
 }
 
-/** Wires the keep choice: updates the note and hides the email choice when the newer account is kept. */
+/** Wires the keep choice: updates the note and hides the email choice when the other account is kept. */
 function wireKeepChoice(p) {
   document.querySelectorAll('input[name="keepPick"]').forEach((r) => r.addEventListener('change', () => {
-    const newer = document.querySelector('input[name="keepPick"]:checked')?.value === 'newer';
-    $('keepNote').textContent = newer
-      ? `The older account is merged into the newer one. Its orders and login phone move to the newer account${S.meta.flitsEnabled ? ', and its Flits points are moved to the newer account' : ''}.`
-      : `The newer account is merged into the older one${S.meta.flitsEnabled ? '; its Flits points move to the older account' : ''}.`;
-    if ($('emailBox')) $('emailBox').hidden = newer;
-    const [from, into] = newer ? [p.keep, p.dup] : [p.dup, p.keep];
-    if ($('mergeLine')) $('mergeLine').textContent = `${from.name || from.email} (${newer ? 'older' : 'newer'}) will be merged into ${into.name || into.email} (${fmtPhone(p.phone)}).`;
+    const swapped = document.querySelector('input[name="keepPick"]:checked')?.value === 'swap';
+    $('keepNote').textContent = keepNoteText(p, swapped);
+    if ($('emailBox')) $('emailBox').hidden = swapped;
+    const [from, into] = swapped ? [p.keep, p.dup] : [p.dup, p.keep];
+    if ($('mergeLine')) $('mergeLine').textContent = `${from.name || from.email} (${ageOf(from, into)}) will be merged into ${into.name || into.email} (${fmtPhone(p.phone)}).`;
   }));
 }
 
+// The server calls keeping the other account of a pair "newer" (it was added for that case).
 function readKeepChoice(p) {
-  return document.querySelector('input[name="keepPick"]:checked')?.value === 'newer' ? { keepPick: { [p.key]: 'newer' } } : {};
+  return document.querySelector('input[name="keepPick"]:checked')?.value === 'swap' ? { keepPick: { [p.key]: 'newer' } } : {};
 }
 
 function confirmMerge(pairs) {
@@ -845,14 +883,17 @@ function reviewHighRisk(p) {
     <ul class="reasons">${p.reasons.map((r) => `<li class="r-${r.level}" style="color:var(--${r.level === 'low' ? 'muted' : r.level})">${esc(r.text)}</li>`).join('')}</ul>
     <div class="tablewrap" style="margin-top:14px">
     <table class="compare">
-      <tr><th></th><th>Duplicate account (will be deleted)</th><th>Account kept</th></tr>
+      <tr><th></th><th>${isNoPhone(p) ? 'Old account, no mobile (will be deleted)' : 'Duplicate account (will be deleted)'}</th><th>Account kept</th></tr>
       ${row('First name', d.firstName, k.firstName, 'first')}
       ${row('Last name', d.lastName, k.lastName)}
       <tr><td>Email</td><td>${esc(d.email) || '<span class="meta">none</span>'}</td><td>${esc(k.email) || '<span class="meta">none</span>'}</td></tr>
-      <tr><td>Phone match</td><td colspan="2">${esc(fmtPhone(p.phone))} ${p.type === 'phone-owner' ? '(kept account logs in with it)' : '(on both accounts\u2019 addresses)'}</td></tr>
+      ${isNoPhone(p)
+        ? `<tr><td>Matched on</td><td colspan="2">${esc((p.matchedOn || []).join(', '))}. The old account has no phone; the kept account logs in with ${esc(fmtPhone(p.phone))}.</td></tr>`
+        : `<tr><td>Phone match</td><td colspan="2">${esc(fmtPhone(p.phone))} ${p.type === 'phone-owner' ? '(kept account logs in with it)' : '(on both accounts\u2019 addresses)'}</td></tr>`}
       <tr><td>Orders</td><td>${d.orders}</td><td>${k.orders}</td></tr>
       <tr><td>Joined</td><td>${fmtDate(d.createdAt)}</td><td>${fmtDate(k.createdAt)}</td></tr>
       ${row('City', d.city, k.city)}
+      ${row('Pincode', d.zip, k.zip)}
       ${S.meta.flitsEnabled ? `<tr><td>Flits points</td><td>${fmtPts(p.points || 0)} (will move)</td><td></td></tr>` : ''}
       <tr><td>In Shopify</td><td><a href="${adminUrl(d.id)}" target="_blank" rel="noopener">Open duplicate</a></td><td><a href="${adminUrl(k.id)}" target="_blank" rel="noopener">Open account kept</a></td></tr>
     </table></div>
@@ -985,8 +1026,17 @@ document.querySelector('.tabs').addEventListener('click', (e) => {
   if (!tab) return;
   S.tab = tab.dataset.tab;
   document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', String(t === tab)));
-  for (const v of ['review', 'history', 'dismissed']) $(`view-${v}`).hidden = v !== S.tab;
-  $('bulk').hidden = S.tab !== 'review' || S.selected.size === 0;
+  const list = S.tab === 'review' || S.tab === 'nophone';
+  if (list && S.kind !== S.tab) {
+    // Each list tab has its own pairs: start it fresh, with nothing selected from the other tab.
+    S.kind = S.tab;
+    S.filter = 'all';
+    S.shown = 200;
+    S.selected.clear();
+    renderStrip(); renderList(); renderBulk();
+  }
+  for (const v of ['review', 'history', 'dismissed']) $(`view-${v}`).hidden = v !== (S.tab === 'nophone' ? 'review' : S.tab);
+  $('bulk').hidden = !list || S.selected.size === 0;
   if (S.tab === 'history') loadHistory();
   if (S.tab === 'dismissed') loadDismissed();
 });

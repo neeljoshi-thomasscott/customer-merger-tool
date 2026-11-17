@@ -204,6 +204,27 @@ Shopify's merge preview and reads the Flits points to move. Pairs are rated:
 
 These rules are enforced by the server too, not just hidden in the screen.
 
+**Old accounts without a mobile number (the *No mobile number* tab).** Before mobile-number login, customers checked
+out with Shopify's email login, so one person can have an old account with **no phone at all** and a newer account that
+logs in with their mobile number. No phone links the two, so the same scan matches each such old account to a
+mobile-number account on:
+
+- the **same full name** (first and last name),
+- the **same pincode** on a saved address,
+- a **similar email**: the letters before the `@`, without dots, digits or the domain (`neel.joshi@thomasscott.in`
+  and `neeljoshi12@gmail.com` both give `neeljoshi`). Temporary emails and generic ones like `support@` don't count,
+- the **same city**, as weak support only.
+
+| Risk | When |
+|---|---|
+| Medium (select and bulk merge) | Same name and same pincode, or same name and similar email |
+| High (one at a time, side-by-side review) | Only name and city match, only the email is similar, the names differ, or the old account matches more than one customer |
+
+A matching name alone isn't suggested, because common names would bring in strangers. Each old account gets one
+suggestion: its best match. The mobile-number account is kept, so the customer keeps logging in with their mobile
+number. Its temporary email is replaced by the old account's real email, and the old account's Flits points move to
+it, as with other merges. These pairs are never low risk and the command-line cleanup never merges them.
+
 **Choosing the account to keep.** By default the older account is kept. When merging one pair, the dialog lets the
 team keep the **newer** account instead: the older account is then merged into it, its login phone is carried over
 (so the customer still logs in with their mobile number), and its Flits points are moved to the newer account's
